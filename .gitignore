@@ -1,0 +1,11 @@
+target/
+.mvn/wrapper/*.jar
+*.log
+.env
+.idea/
+*.iml
+.DS_Store
+infra/node_modules/
+infra/cdk.out/
+infra/dist/
+.jqwik-database
