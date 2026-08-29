@@ -66,8 +66,11 @@ export class ServiceStack extends cdk.Stack {
     props.approvalQueue.grantConsumeMessages(taskDefinition.taskRole);
     props.approvalDeadLetterQueue.grantConsumeMessages(taskDefinition.taskRole);
     taskDefinition.taskRole.addToPrincipalPolicy(new iam.PolicyStatement({
-      actions: ['s3:PutObject'],
-      resources: [props.auditBucket.arnForObjects('audit/*')],
+      actions: ['s3:GetObject', 's3:PutObject'],
+      resources: [
+        props.auditBucket.arnForObjects('audit/*'),
+        props.auditBucket.arnForObjects('entries/*'),
+      ],
     }));
     props.apiKeySecret.grantRead(taskDefinition.taskRole);
 

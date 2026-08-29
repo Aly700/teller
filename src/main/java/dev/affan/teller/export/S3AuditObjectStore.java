@@ -7,10 +7,11 @@ import org.springframework.util.StringUtils;
 import software.amazon.awssdk.core.sync.RequestBody;
 import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.s3.model.PutObjectRequest;
+import software.amazon.awssdk.services.s3.model.GetObjectRequest;
 
 @Component
 @ConditionalOnProperty(name = "teller.aws.enabled", havingValue = "true")
-public final class S3AuditObjectStore implements AuditObjectStore {
+public class S3AuditObjectStore implements AuditObjectStore {
 
     private final S3Client s3Client;
     private final String bucket;
@@ -34,5 +35,14 @@ public final class S3AuditObjectStore implements AuditObjectStore {
                 .contentLength((long) jsonLines.length)
                 .build();
         s3Client.putObject(request, RequestBody.fromBytes(jsonLines));
+    }
+
+    @Override
+    public byte[] get(String objectKey) {
+        return s3Client.getObjectAsBytes(GetObjectRequest.builder()
+                        .bucket(bucket)
+                        .key(objectKey)
+                        .build())
+                .asByteArray();
     }
 }

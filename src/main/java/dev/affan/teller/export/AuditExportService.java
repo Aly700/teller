@@ -33,11 +33,23 @@ public class AuditExportService {
 
     public AuditExportResult export(LocalDate date) {
         Instant from = date.atStartOfDay().toInstant(ZoneOffset.UTC);
+        return export(date, OBJECT_STAMP.format(from));
+    }
+
+    public AuditExportResult export(LocalDate date, String objectName) {
+        Instant from = date.atStartOfDay().toInstant(ZoneOffset.UTC);
         Instant to = date.plusDays(1).atStartOfDay().toInstant(ZoneOffset.UTC);
         List<AuditRecord> records = auditRecords.find(from, to);
-        String objectKey = "audit/dt=%s/%s.jsonl".formatted(date, OBJECT_STAMP.format(from));
+        String objectKey = "audit/dt=%s/%s.jsonl".formatted(date, requireObjectName(objectName));
         objectStore.put(objectKey, serialize(records));
         return new AuditExportResult(date, objectKey, records.size());
+    }
+
+    private static String requireObjectName(String value) {
+        if (value == null || !value.matches("[A-Za-z0-9-]+")) {
+            throw new IllegalArgumentException("objectName must contain only letters, digits, and hyphens");
+        }
+        return value;
     }
 
     private byte[] serialize(List<AuditRecord> records) {

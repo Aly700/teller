@@ -16,7 +16,7 @@ import tools.jackson.databind.ObjectMapper;
 
 @Component
 @Order(Ordered.HIGHEST_PRECEDENCE + 20)
-public final class IdempotencyKeyFilter extends OncePerRequestFilter {
+public class IdempotencyKeyFilter extends OncePerRequestFilter {
 
     public static final String HEADER_NAME = "Idempotency-Key";
     public static final String REQUEST_ATTRIBUTE = "teller.idempotency-key";

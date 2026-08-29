@@ -2,13 +2,13 @@
 
 Teller is a Java 21/Spring Boot payments core with a policy gate. It keeps money as signed-safe `long` minor units plus an ISO-4217 currency code, posts transfers through a double-entry ledger, and routes policy-sensitive transfers through four-eyes approval over SQS.
 
-The original policy machinery remains part of the service: ordered first-match rules with default deny, immutable decisions, approvals, append-only audit, transactional outbox, idempotent SQS consumption, DLQ replay, and date-partitioned S3 audit export.
+The original policy machinery remains part of the service: ordered first-match rules with default deny, immutable decisions, approvals, append-only audit, transactional outbox, idempotent SQS consumption, DLQ replay, date-partitioned S3 entry/audit export, and reconciliation.
 
 ## Correctness model
 
 - An account caches ledger and available balances and carries a JPA `@Version`.
 - A hold reduces only available balance. Approval turns the reservation into a ledger debit without subtracting available twice; denial or expiry releases it.
-- Posting writes a positive debit row and a positive credit row. PostgreSQL deferred constraint triggers compute `CREDIT - DEBIT` for every affected transfer at commit and reject a non-zero result; posted transfers must contain a complete posting.
+- Posting writes a positive debit row and a positive credit row. Demo deposits are also balanced postings: a customer credit and an external funding debit with no account. PostgreSQL deferred constraint triggers compute `CREDIT - DEBIT` for every affected posting and transfer at commit and reject a non-zero result; posted transfers must contain a complete posting.
 - Reversing a posted transfer writes compensating credit/debit entries. Reversing a held transfer releases its reservation without inventing ledger entries.
 - Money movement locks both account rows in UUID order and re-checks funds after locking. Concurrent transfers therefore serialize without deadlock or lost updates and cannot overdraw available balance.
 
@@ -27,7 +27,10 @@ flowchart LR
     Approval -->|deny or expire| Released[REVERSED + release]
     Ledger --> DB
     API --> Audit[Append-only audit]
-    Audit --> S3[S3 JSONL export]
+    Ledger --> Export[S3 entry JSONL]
+    Audit --> Export
+    Export --> Reconcile[Balance + row/amount reconciliation]
+    Reconcile -->|mismatch| Audit
 ```
 
 ## API
@@ -50,6 +53,9 @@ All routes except `/actuator/health` require `X-API-Key`.
 | `POST` | `/approvals/{id}/deny` | Deny and release a held transfer |
 | `GET` | `/audit?from=&to=` | Query append-only audit records |
 | `POST` | `/admin/exports/audit?date=` | Export a UTC audit day to S3 |
+| `POST` | `/admin/exports/daily?date=` | Export UTC entry and audit JSONL partitions to S3 |
+| `POST` | `/admin/reconciliation?date=` | Export and reconcile a UTC day immediately |
+| `GET` | `/admin/reconciliation/latest` | Read the latest persisted reconciliation result |
 | `POST` | `/admin/dlq/replay?limit=` | Replay up to ten approval DLQ messages |
 
 Transfer rules use `toolNameGlob: "ledger.transfer"`. Money fields are inclusive `amountMin`/`amountMax`; `fourEyesAbove` is exclusive; velocity requires both `velocityMax` and `velocityWindowSeconds`. All amounts are minor units. A counterparty in both lists is denied. Lower precedence numbers run first, and no match is a deny.
@@ -146,6 +152,12 @@ curl --fail-with-body -sS "http://localhost:8080/accounts/$SOURCE_ID" \
   -H "X-API-Key: $TELLER_API_KEY" | jq
 curl --fail-with-body -sS "http://localhost:8080/accounts/$DESTINATION_ID" \
   -H "X-API-Key: $TELLER_API_KEY" | jq
+
+curl --fail-with-body -sS -X POST \
+  "http://localhost:8080/admin/reconciliation?date=$(date -u +%F)" \
+  -H "X-API-Key: $TELLER_API_KEY" | jq
+curl --fail-with-body -sS "http://localhost:8080/admin/reconciliation/latest" \
+  -H "X-API-Key: $TELLER_API_KEY" | jq
 ```
 
 Reusing a transfer `Idempotency-Key` with the same canonical body returns the stored body with HTTP 200; changing that body returns 409.
@@ -159,7 +171,8 @@ Reusing a transfer `Idempotency-Key` with the same canonical body returns the st
 | `TELLER_AWS_ENABLED` | production | Enable SQS/S3 adapters |
 | `AWS_REGION` | production | SDK client region |
 | `APPROVAL_QUEUE_URL`, `APPROVAL_DLQ_URL` | AWS/local | Exact SQS URLs |
-| `AUDIT_BUCKET` | AWS/local | Audit-export bucket |
+| `AUDIT_BUCKET` | AWS/local | Entry and audit export bucket |
+| `AUDIT_EXPORT_ENABLED`, `AUDIT_EXPORT_CRON` | no | Enable nightly export/reconciliation and set its UTC cron |
 | `AWS_ENDPOINT_URL` | local only | LocalStack endpoint |
 | `APPROVAL_TTL` | no | Hold lifetime; default `PT30M` |
 | `IDEMPOTENCY_TTL` | no | Key retention; default `PT24H` |
@@ -169,11 +182,22 @@ Reusing a transfer `Idempotency-Key` with the same canonical body returns the st
 Pure tests and compilation run offline without Docker:
 
 ```bash
-./mvnw -o -q -Dtest='MoneyTest,AccountLedgerTest,TransferStateMachineTest,MoneyRulesEngineProperties,RulesEngineTest,RulesEngineProperties,ApprovalStateMachineTest,SimulationTest,AuditExportServiceTest,S3AuditObjectStoreTest,AwsApprovalQueuePublisherTest,ApprovalMessageCodecTest,ApprovalQueueWorkerTest,OutboxRelayTest,ApprovalMessageValidatorTest,DlqReplayTest,HttpRequestLoggingFilterTest,ApiKeyFilterTest,AwsClientConfigurationTest' -Dsurefire.failIfNoSpecifiedTests=false test
+./mvnw -o -q -Dtest='MoneyTest,AccountLedgerTest,TransferStateMachineTest,IdempotencyServiceTest,MoneyRulesEngineProperties,RulesEngineTest,RulesEngineProperties,ApprovalStateMachineTest,SimulationTest,AuditExportServiceTest,EntryExportServiceTest,ReconciliationComparatorTest,ReconciliationServiceTest,S3AuditObjectStoreTest,AwsApprovalQueuePublisherTest,ApprovalMessageCodecTest,ApprovalQueueWorkerTest,OutboxRelayTest,ApprovalMessageValidatorTest,DlqReplayTest,HttpRequestLoggingFilterTest,ApiKeyFilterTest,AwsClientConfigurationTest' -Dsurefire.failIfNoSpecifiedTests=false test
 ./mvnw -o -q -DskipTests package
 ```
 
-On a Docker host, the full offline suite adds PostgreSQL and LocalStack tests for balance constraints, each policy path, reservation expiry, transfer idempotency, and concurrent draining:
+`SimulationTest` runs 200 deterministic seeds by default, writes its aggregate report to `target/sim-coverage.json`, and prints the same JSON. A single failure is reproducible and the 2,000-seed gate is explicit:
+
+```bash
+./mvnw -o -q -Dtest=SimulationTest -Dsim.seed=137 -Dsurefire.failIfNoSpecifiedTests=false test
+./mvnw -o -q -Dtest=SimulationTest -Dsim.seeds=2000 -Dsurefire.failIfNoSpecifiedTests=false test
+```
+
+During Task C development, the ledger-derived-balance invariant failed immediately for every funded account: deposits changed the cached balance and audit but created no entries. That finding introduced the balanced external/customer deposit posting described above; reconciliation and the simulator now derive customer ledger balances entirely from entries.
+
+Daily export/reconciliation uses immutable per-run objects inside each UTC date partition and a PostgreSQL repeatable-read snapshot. Reconciliation verifies every exported entry's immutable content as well as row counts, per-currency debit/credit totals, and cached account balances.
+
+On a Docker host, the full offline suite adds PostgreSQL and LocalStack tests for balance constraints, each policy path, reservation expiry, transfer idempotency, concurrent draining, S3 entry/audit export, and reconciliation:
 
 ```bash
 ./mvnw -o -q test

@@ -23,7 +23,7 @@ import software.amazon.awssdk.services.sqs.model.ReceiveMessageResponse;
 @ConditionalOnProperty(
         name = {"teller.aws.enabled", "teller.aws.sqs.worker-enabled"},
         havingValue = "true")
-public final class ApprovalQueueWorker {
+public class ApprovalQueueWorker {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(ApprovalQueueWorker.class);
 

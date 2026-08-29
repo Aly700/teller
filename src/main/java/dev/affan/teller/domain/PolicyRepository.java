@@ -15,6 +15,21 @@ public interface PolicyRepository extends JpaRepository<Policy, UUID>, PolicySto
     int deactivateAll();
 
     @Override
+    default Policy storePolicy(Policy policy) {
+        return save(policy);
+    }
+
+    @Override
+    default boolean policyNameAndVersionExists(String name, int version) {
+        return existsByNameAndVersion(name, version);
+    }
+
+    @Override
+    default int deactivateAllPolicies() {
+        return deactivateAll();
+    }
+
+    @Override
     default java.util.Optional<Policy> findPolicyById(UUID id) {
         return findById(id);
     }

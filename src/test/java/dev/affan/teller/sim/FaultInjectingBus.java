@@ -32,6 +32,7 @@ final class FaultInjectingBus implements ApprovalQueuePublisher {
     private final Map<String, Envelope> inFlight = new LinkedHashMap<>();
     private final Map<UUID, Integer> publishAttempts = new LinkedHashMap<>();
     private final Map<UUID, Integer> effectCounts = new LinkedHashMap<>();
+    private final Map<String, Long> faultCounts = new LinkedHashMap<>();
     private boolean faultsEnabled = true;
     private long transportSequence;
     private long receiptSequence;
@@ -68,6 +69,8 @@ final class FaultInjectingBus implements ApprovalQueuePublisher {
 
         enqueueWithNetworkFaults(message, "primary");
         if (faultsEnabled && simulator.chance(faults.duplicateProbability())) {
+            recordFault("duplicate");
+            trace.record(simulator.instant(), "fault=duplicate event=" + message.messageId());
             enqueueWithNetworkFaults(message, "duplicate");
         }
         if (crashAfterCommit("outbox-publish")) {
@@ -103,6 +106,7 @@ final class FaultInjectingBus implements ApprovalQueuePublisher {
     boolean crashBeforeCommit(String operation) {
         boolean crash = faultsEnabled && simulator.chance(faults.crashBeforeCommitProbability());
         if (crash) {
+            recordFault("crash-before-commit");
             trace.record(simulator.instant(), "fault=crash-before-commit operation=" + operation);
         }
         return crash;
@@ -111,6 +115,7 @@ final class FaultInjectingBus implements ApprovalQueuePublisher {
     boolean crashAfterCommit(String operation) {
         boolean crash = faultsEnabled && simulator.chance(faults.crashAfterCommitProbability());
         if (crash) {
+            recordFault("crash-after-commit");
             trace.record(simulator.instant(), "fault=crash-after-commit operation=" + operation);
         }
         return crash;
@@ -122,6 +127,10 @@ final class FaultInjectingBus implements ApprovalQueuePublisher {
 
     Map<UUID, Integer> publishAttempts() {
         return Map.copyOf(publishAttempts);
+    }
+
+    Map<String, Long> faultCounts() {
+        return Map.copyOf(faultCounts);
     }
 
     int pendingMessages() {
@@ -138,6 +147,7 @@ final class FaultInjectingBus implements ApprovalQueuePublisher {
                 "transport-" + simulator.seed() + "-" + transportSequence++,
                 codec.encode(message));
         if (faultsEnabled && simulator.chance(faults.dropThenRedeliverProbability())) {
+            recordFault("drop-then-redeliver");
             trace.record(simulator.instant(), "fault=drop-then-redeliver event=" + message.messageId());
             simulator.schedule(
                     Duration.ofMillis(100L + simulator.nextInt(400)),
@@ -149,6 +159,7 @@ final class FaultInjectingBus implements ApprovalQueuePublisher {
                 ? Duration.ofMillis(1L + simulator.nextInt(300))
                 : Duration.ZERO;
         if (!delay.isZero()) {
+            recordFault("delay");
             trace.record(simulator.instant(), "fault=delay event=" + message.messageId() + " by=" + delay);
         }
         simulator.schedule(delay, "deliver-" + kind + " " + message.messageId(), () -> deliver(envelope, kind));
@@ -157,6 +168,7 @@ final class FaultInjectingBus implements ApprovalQueuePublisher {
     private void deliver(Envelope envelope, String kind) {
         boolean reordered = faultsEnabled && simulator.chance(faults.reorderProbability());
         if (reordered) {
+            recordFault("reorder");
             available.addFirst(envelope);
         } else {
             available.addLast(envelope);
@@ -203,9 +215,14 @@ final class FaultInjectingBus implements ApprovalQueuePublisher {
     private void redeliverIfUnacknowledged(String receipt) {
         Envelope envelope = inFlight.remove(receipt);
         if (envelope != null) {
+            recordFault("visibility-redelivery");
             available.addLast(envelope);
             trace.record(simulator.instant(), "queue-redelivery transport=" + envelope.transportId());
         }
+    }
+
+    private void recordFault(String kind) {
+        faultCounts.merge(kind, 1L, Long::sum);
     }
 
     record FaultProfile(

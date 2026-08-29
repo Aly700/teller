@@ -5,7 +5,7 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 @Component
-public final class ApprovalExpiryWorker {
+public class ApprovalExpiryWorker {
 
     private final ApprovalService approvalService;
 

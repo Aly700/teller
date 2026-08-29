@@ -12,16 +12,16 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 public class TransferSettlementService implements ApprovalLifecycleListener {
 
-    private final TransferRepository transfers;
-    private final AccountRepository accounts;
-    private final EntryRepository entries;
+    private final TransferStore transfers;
+    private final AccountStore accounts;
+    private final EntryStore entries;
     private final AuditService auditService;
     private final Clock clock;
 
     public TransferSettlementService(
-            TransferRepository transfers,
-            AccountRepository accounts,
-            EntryRepository entries,
+            TransferStore transfers,
+            AccountStore accounts,
+            EntryStore entries,
             AuditService auditService,
             Clock clock) {
         this.transfers = transfers;
@@ -34,7 +34,7 @@ public class TransferSettlementService implements ApprovalLifecycleListener {
     @Override
     @Transactional
     public void approved(UUID decisionId) {
-        transfers.findLockedByDecisionId(decisionId).ifPresent(transfer -> {
+        transfers.findLockedTransferByDecisionId(decisionId).ifPresent(transfer -> {
             if (transfer.getState() != TransferState.HELD) {
                 throw new InvalidApprovalTransitionException("linked transfer is no longer held");
             }
@@ -57,12 +57,12 @@ public class TransferSettlementService implements ApprovalLifecycleListener {
     @Override
     @Transactional
     public void rejected(UUID decisionId, String reasonCode) {
-        transfers.findLockedByDecisionId(decisionId).ifPresent(transfer -> {
+        transfers.findLockedTransferByDecisionId(decisionId).ifPresent(transfer -> {
             if (transfer.getState() != TransferState.HELD) {
                 return;
             }
             Money money = Money.of(transfer.getAmountMinor(), transfer.getCurrency());
-            Account source = accounts.findLockedById(transfer.getFromAccountId())
+            Account source = accounts.findLockedAccountById(transfer.getFromAccountId())
                     .orElseThrow(() -> new ResourceNotFoundException("account", transfer.getFromAccountId()));
             source.release(money);
             transfer.reverse(reasonCode, clock.instant());
@@ -80,7 +80,7 @@ public class TransferSettlementService implements ApprovalLifecycleListener {
     private List<Account> lockAccounts(Transfer transfer) {
         return List.of(transfer.getFromAccountId(), transfer.getToAccountId()).stream()
                 .sorted(Comparator.naturalOrder())
-                .map(id -> accounts.findLockedById(id)
+                .map(id -> accounts.findLockedAccountById(id)
                         .orElseThrow(() -> new ResourceNotFoundException("account", id)))
                 .toList();
     }
@@ -91,20 +91,25 @@ public class TransferSettlementService implements ApprovalLifecycleListener {
             Account destination,
             Money money) {
         Instant now = clock.instant();
-        entries.saveAll(List.of(
+        UUID postingId = UUID.randomUUID();
+        entries.storeEntries(List.of(
                 Entry.create(
                         UUID.randomUUID(),
+                        postingId,
                         transfer.getId(),
                         source.getId(),
                         EntryDirection.DEBIT,
                         money.minorUnits(),
+                        money.currency(),
                         now),
                 Entry.create(
                         UUID.randomUUID(),
+                        postingId,
                         transfer.getId(),
                         destination.getId(),
                         EntryDirection.CREDIT,
                         money.minorUnits(),
+                        money.currency(),
                         now)));
     }
 

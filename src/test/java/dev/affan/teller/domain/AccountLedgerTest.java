@@ -79,9 +79,11 @@ class AccountLedgerTest {
         UUID transferId = UUID.randomUUID();
         long amount = 4_250;
         Entry debit = Entry.create(
-                UUID.randomUUID(), transferId, UUID.randomUUID(), EntryDirection.DEBIT, amount, NOW);
+                UUID.randomUUID(), transferId, transferId, UUID.randomUUID(),
+                EntryDirection.DEBIT, amount, "USD", NOW);
         Entry credit = Entry.create(
-                UUID.randomUUID(), transferId, UUID.randomUUID(), EntryDirection.CREDIT, amount, NOW);
+                UUID.randomUUID(), transferId, transferId, UUID.randomUUID(),
+                EntryDirection.CREDIT, amount, "USD", NOW);
 
         assertThat(LedgerArithmetic.signedTotal(List.of(debit, credit))).isZero();
         assertThat(LedgerArithmetic.isBalanced(List.of(debit, credit))).isTrue();

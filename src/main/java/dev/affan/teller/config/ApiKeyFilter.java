@@ -19,7 +19,7 @@ import tools.jackson.databind.ObjectMapper;
 
 @Component
 @Order(Ordered.HIGHEST_PRECEDENCE + 10)
-public final class ApiKeyFilter extends OncePerRequestFilter {
+public class ApiKeyFilter extends OncePerRequestFilter {
 
     private static final String HEADER_NAME = "X-API-Key";
 

@@ -7,7 +7,7 @@ import java.util.List;
 import org.springframework.stereotype.Component;
 
 @Component
-public final class JpaAuditRecordSource implements AuditRecordSource {
+public class JpaAuditRecordSource implements AuditRecordSource {
 
     private final AuditRecordRepository auditRecords;
 

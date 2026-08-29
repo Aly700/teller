@@ -9,7 +9,7 @@ import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
-public interface TransferRepository extends JpaRepository<Transfer, UUID> {
+public interface TransferRepository extends JpaRepository<Transfer, UUID>, TransferStore {
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     Optional<Transfer> findLockedByDecisionId(UUID decisionId);
@@ -22,4 +22,35 @@ public interface TransferRepository extends JpaRepository<Transfer, UUID> {
             UUID fromAccountId,
             Instant createdAt,
             TransferState state);
+
+    @Override
+    default Transfer storeTransfer(Transfer transfer) {
+        return save(transfer);
+    }
+
+    @Override
+    default Optional<Transfer> findTransferById(UUID id) {
+        return findById(id);
+    }
+
+    @Override
+    default Optional<Transfer> findLockedTransferById(UUID id) {
+        return findLockedById(id);
+    }
+
+    @Override
+    default Optional<Transfer> findLockedTransferByDecisionId(UUID decisionId) {
+        return findLockedByDecisionId(decisionId);
+    }
+
+    @Override
+    default long countTransfers(UUID fromAccountId, Instant createdAt, TransferState excludedState) {
+        return countByFromAccountIdAndCreatedAtGreaterThanEqualAndStateNot(
+                fromAccountId, createdAt, excludedState);
+    }
+
+    @Override
+    default java.util.List<Transfer> findAllTransfers() {
+        return findAll();
+    }
 }

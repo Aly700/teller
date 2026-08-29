@@ -9,7 +9,7 @@ import software.amazon.awssdk.services.sqs.model.SendMessageRequest;
 
 @Component
 @ConditionalOnProperty(name = "teller.aws.enabled", havingValue = "true")
-public final class AwsApprovalQueuePublisher implements ApprovalQueuePublisher {
+public class AwsApprovalQueuePublisher implements ApprovalQueuePublisher {
 
     private final SqsClient sqsClient;
     private final ApprovalMessageCodec codec;

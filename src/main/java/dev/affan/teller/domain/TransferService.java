@@ -13,9 +13,9 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 public class TransferService {
 
-    private final AccountRepository accounts;
-    private final TransferRepository transfers;
-    private final EntryRepository entries;
+    private final AccountStore accounts;
+    private final TransferStore transfers;
+    private final EntryStore entries;
     private final PolicyStore policies;
     private final RuleStore rules;
     private final DecisionService decisionService;
@@ -23,9 +23,9 @@ public class TransferService {
     private final Clock clock;
 
     public TransferService(
-            AccountRepository accounts,
-            TransferRepository transfers,
-            EntryRepository entries,
+            AccountStore accounts,
+            TransferStore transfers,
+            EntryStore entries,
             PolicyStore policies,
             RuleStore rules,
             DecisionService decisionService,
@@ -43,7 +43,7 @@ public class TransferService {
 
     @Transactional
     public Account createAccount(String currency) {
-        Account account = accounts.save(Account.open(UUID.randomUUID(), currency, clock.instant()));
+        Account account = accounts.storeAccount(Account.open(UUID.randomUUID(), currency, clock.instant()));
         auditService.append(
                 AuditEventType.ACCOUNT_CREATED,
                 "ACCOUNT",
@@ -54,7 +54,7 @@ public class TransferService {
 
     @Transactional(readOnly = true)
     public Account getAccount(UUID id) {
-        return accounts.findById(id)
+        return accounts.findAccountById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("account", id));
     }
 
@@ -62,6 +62,7 @@ public class TransferService {
     public Account deposit(UUID id, Money money) {
         Account account = lockAccount(id);
         account.deposit(money);
+        writeDepositEntries(account, money);
         auditService.append(
                 AuditEventType.ACCOUNT_DEPOSITED,
                 "ACCOUNT",
@@ -99,7 +100,7 @@ public class TransferService {
                 money,
                 outcome.decision().getId(),
                 clock.instant());
-        transfer = transfers.save(transfer);
+        transfer = transfers.storeTransfer(transfer);
 
         switch (outcome.decision().getEffect()) {
             case DENY -> transfer.deny("POLICY_DENIED");
@@ -112,13 +113,13 @@ public class TransferService {
 
     @Transactional(readOnly = true)
     public Transfer getTransfer(UUID id) {
-        return transfers.findById(id)
+        return transfers.findTransferById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("transfer", id));
     }
 
     @Transactional
     public Transfer reverse(UUID id, String reasonCode) {
-        Transfer transfer = transfers.findLockedById(id)
+        Transfer transfer = transfers.findLockedTransferById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("transfer", id));
         Money money = Money.of(transfer.getAmountMinor(), transfer.getCurrency());
         List<Account> locked = lockAccounts(transfer.getFromAccountId(), transfer.getToAccountId());
@@ -169,7 +170,7 @@ public class TransferService {
                 .distinct()
                 .forEach(window -> counts.put(
                         window,
-                        transfers.countByFromAccountIdAndCreatedAtGreaterThanEqualAndStateNot(
+                        transfers.countTransfers(
                                 sourceAccountId,
                                 now.minusSeconds(window),
                                 TransferState.DENIED)));
@@ -182,20 +183,49 @@ public class TransferService {
             Account creditAccount,
             Money money) {
         Instant now = clock.instant();
-        entries.saveAll(List.of(
+        UUID postingId = UUID.randomUUID();
+        entries.storeEntries(List.of(
                 Entry.create(
                         UUID.randomUUID(),
+                        postingId,
                         transfer.getId(),
                         debitAccount.getId(),
                         EntryDirection.DEBIT,
                         money.minorUnits(),
+                        money.currency(),
                         now),
                 Entry.create(
                         UUID.randomUUID(),
+                        postingId,
                         transfer.getId(),
                         creditAccount.getId(),
                         EntryDirection.CREDIT,
                         money.minorUnits(),
+                        money.currency(),
+                        now)));
+    }
+
+    private void writeDepositEntries(Account account, Money money) {
+        Instant now = clock.instant();
+        UUID postingId = UUID.randomUUID();
+        entries.storeEntries(List.of(
+                Entry.create(
+                        UUID.randomUUID(),
+                        postingId,
+                        null,
+                        account.getId(),
+                        EntryDirection.CREDIT,
+                        money.minorUnits(),
+                        money.currency(),
+                        now),
+                Entry.create(
+                        UUID.randomUUID(),
+                        postingId,
+                        null,
+                        null,
+                        EntryDirection.DEBIT,
+                        money.minorUnits(),
+                        money.currency(),
                         now)));
     }
 
@@ -210,7 +240,7 @@ public class TransferService {
     }
 
     private Account lockAccount(UUID id) {
-        return accounts.findLockedById(id)
+        return accounts.findLockedAccountById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("account", id));
     }
 

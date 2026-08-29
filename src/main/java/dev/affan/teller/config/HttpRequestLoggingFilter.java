@@ -15,7 +15,7 @@ import org.springframework.web.filter.OncePerRequestFilter;
 
 @Component
 @Order(Ordered.HIGHEST_PRECEDENCE)
-public final class HttpRequestLoggingFilter extends OncePerRequestFilter {
+public class HttpRequestLoggingFilter extends OncePerRequestFilter {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(HttpRequestLoggingFilter.class);
 

@@ -3,15 +3,24 @@ package dev.affan.teller.sim;
 import dev.affan.teller.domain.Approval;
 import dev.affan.teller.domain.ApprovalStatus;
 import dev.affan.teller.domain.ApprovalStore;
+import dev.affan.teller.domain.Account;
+import dev.affan.teller.domain.AccountStore;
 import dev.affan.teller.domain.AuditRecord;
 import dev.affan.teller.domain.AuditStore;
 import dev.affan.teller.domain.Decision;
 import dev.affan.teller.domain.DecisionOutcome;
 import dev.affan.teller.domain.DecisionStore;
+import dev.affan.teller.domain.Entry;
+import dev.affan.teller.domain.EntryStore;
+import dev.affan.teller.domain.IdempotencyRecord;
+import dev.affan.teller.domain.IdempotencyStore;
 import dev.affan.teller.domain.Policy;
 import dev.affan.teller.domain.PolicyStore;
 import dev.affan.teller.domain.Rule;
 import dev.affan.teller.domain.RuleStore;
+import dev.affan.teller.domain.Transfer;
+import dev.affan.teller.domain.TransferState;
+import dev.affan.teller.domain.TransferStore;
 import dev.affan.teller.sqs.OutboxMessage;
 import dev.affan.teller.sqs.OutboxStore;
 import java.time.Instant;
@@ -33,10 +42,23 @@ import org.springframework.transaction.TransactionStatus;
 import org.springframework.transaction.support.SimpleTransactionStatus;
 
 final class InMemoryStores
-        implements PolicyStore, RuleStore, DecisionStore, ApprovalStore, AuditStore, OutboxStore {
+        implements AccountStore,
+        TransferStore,
+        EntryStore,
+        IdempotencyStore,
+        PolicyStore,
+        RuleStore,
+        DecisionStore,
+        ApprovalStore,
+        AuditStore,
+        OutboxStore {
 
     private final Trace trace;
     private final InstantSource now;
+    private final Map<UUID, Account> accounts = new LinkedHashMap<>();
+    private final Map<UUID, Transfer> transfers = new LinkedHashMap<>();
+    private final Map<UUID, Entry> entries = new LinkedHashMap<>();
+    private final Map<String, IdempotencyRecord> idempotencyRecords = new LinkedHashMap<>();
     private final Map<UUID, Policy> policies = new LinkedHashMap<>();
     private final Map<UUID, Rule> rules = new LinkedHashMap<>();
     private final Map<UUID, Decision> decisions = new LinkedHashMap<>();
@@ -46,6 +68,8 @@ final class InMemoryStores
     private final Set<String> processedMessageIds = new LinkedHashSet<>();
     private final Map<String, DecisionOutcome> idempotentOutcomes = new LinkedHashMap<>();
     private final Map<String, List<UUID>> decisionResultsByKey = new LinkedHashMap<>();
+    private final Map<String, List<UUID>> transferResultsByKey = new LinkedHashMap<>();
+    private final Map<String, List<Integer>> transferEntryCountsByKey = new LinkedHashMap<>();
 
     InMemoryStores(Trace trace, InstantSource now) {
         this.trace = trace;
@@ -76,6 +100,22 @@ final class InMemoryStores
         return this;
     }
 
+    AccountStore accountStore() {
+        return this;
+    }
+
+    TransferStore transferStore() {
+        return this;
+    }
+
+    EntryStore entryStore() {
+        return this;
+    }
+
+    IdempotencyStore idempotencyStore() {
+        return this;
+    }
+
     void seedPolicy(Policy policy) {
         policies.put(policy.getId(), policy);
     }
@@ -86,6 +126,18 @@ final class InMemoryStores
 
     Collection<Decision> decisions() {
         return List.copyOf(decisions.values());
+    }
+
+    Collection<Account> accounts() {
+        return List.copyOf(accounts.values());
+    }
+
+    Collection<Transfer> transfers() {
+        return List.copyOf(transfers.values());
+    }
+
+    List<Entry> entries() {
+        return List.copyOf(entries.values());
     }
 
     Collection<Approval> approvals() {
@@ -108,6 +160,29 @@ final class InMemoryStores
         Map<String, List<UUID>> copy = new LinkedHashMap<>();
         decisionResultsByKey.forEach((key, ids) -> copy.put(key, List.copyOf(ids)));
         return copy;
+    }
+
+    Map<String, List<UUID>> transferResultsByKey() {
+        Map<String, List<UUID>> copy = new LinkedHashMap<>();
+        transferResultsByKey.forEach((key, ids) -> copy.put(key, List.copyOf(ids)));
+        return copy;
+    }
+
+    Map<String, List<Integer>> transferEntryCountsByKey() {
+        Map<String, List<Integer>> copy = new LinkedHashMap<>();
+        transferEntryCountsByKey.forEach((key, counts) -> copy.put(key, List.copyOf(counts)));
+        return copy;
+    }
+
+    void recordTransferIdempotencyResult(String key, Transfer transfer, Instant at, boolean replay) {
+        trace.record(at, (replay ? "transfer-idempotency-replay key=" : "transfer-idempotency-claim key=")
+                + key + " transfer=" + transfer.getId());
+        transferResultsByKey.computeIfAbsent(key, ignored -> new ArrayList<>()).add(transfer.getId());
+        UUID transferId = transfer.getId();
+        int entryCount = (int) entries.values().stream()
+                .filter(entry -> transferId.equals(entry.getTransferId()))
+                .count();
+        transferEntryCountsByKey.computeIfAbsent(key, ignored -> new ArrayList<>()).add(entryCount);
     }
 
     DecisionOutcome evaluateIdempotently(String key, Supplier<DecisionOutcome> operation, Instant at) {
@@ -157,6 +232,169 @@ final class InMemoryStores
     }
 
     @Override
+    public int insertClaim(String key, String requestHash, Instant createdAt) {
+        if (idempotencyRecords.containsKey(key)) {
+            return 0;
+        }
+        idempotencyRecords.put(key, IdempotencyRecord.claim(key, requestHash, createdAt));
+        trace.record(now.instant(), "idempotency-record-claimed key=" + key);
+        return 1;
+    }
+
+    @Override
+    public Optional<IdempotencyRecord> findLockedByKey(String key) {
+        return Optional.ofNullable(idempotencyRecords.get(key));
+    }
+
+    @Override
+    public int deleteExpiredKey(String key, Instant cutoff) {
+        IdempotencyRecord record = idempotencyRecords.get(key);
+        if (record != null && record.getCreatedAt().isBefore(cutoff)) {
+            idempotencyRecords.remove(key);
+            return 1;
+        }
+        return 0;
+    }
+
+    @Override
+    public int deleteExpired(Instant cutoff) {
+        int before = idempotencyRecords.size();
+        idempotencyRecords.values().removeIf(record -> record.getCreatedAt().isBefore(cutoff));
+        return before - idempotencyRecords.size();
+    }
+
+    @Override
+    public void flushAndRefresh(IdempotencyRecord record) {
+    }
+
+    @Override
+    public Account storeAccount(Account account) {
+        accounts.put(account.getId(), account);
+        trace.record(now.instant(), "account-saved id=" + account.getId());
+        return account;
+    }
+
+    @Override
+    public Optional<Account> findAccountById(UUID id) {
+        return Optional.ofNullable(accounts.get(id));
+    }
+
+    @Override
+    public Optional<Account> findLockedAccountById(UUID id) {
+        return findAccountById(id);
+    }
+
+    @Override
+    public List<Account> findAllAccounts() {
+        return List.copyOf(accounts.values());
+    }
+
+    @Override
+    public Transfer storeTransfer(Transfer transfer) {
+        boolean duplicateKey = transfers.values().stream()
+                .anyMatch(existing -> existing.getIdempotencyKey().equals(transfer.getIdempotencyKey())
+                        && !existing.getId().equals(transfer.getId()));
+        if (duplicateKey) {
+            throw new IllegalStateException("transfer idempotency key already exists");
+        }
+        transfers.put(transfer.getId(), transfer);
+        trace.record(now.instant(), "transfer-saved id=" + transfer.getId());
+        return transfer;
+    }
+
+    @Override
+    public Optional<Transfer> findTransferById(UUID id) {
+        return Optional.ofNullable(transfers.get(id));
+    }
+
+    @Override
+    public Optional<Transfer> findLockedTransferById(UUID id) {
+        return findTransferById(id);
+    }
+
+    @Override
+    public Optional<Transfer> findLockedTransferByDecisionId(UUID decisionId) {
+        return transfers.values().stream()
+                .filter(transfer -> transfer.getDecisionId().equals(decisionId))
+                .findFirst();
+    }
+
+    @Override
+    public long countTransfers(UUID fromAccountId, Instant createdAt, TransferState excludedState) {
+        return transfers.values().stream()
+                .filter(transfer -> transfer.getFromAccountId().equals(fromAccountId))
+                .filter(transfer -> !transfer.getCreatedAt().isBefore(createdAt))
+                .filter(transfer -> transfer.getState() != excludedState)
+                .count();
+    }
+
+    @Override
+    public List<Transfer> findAllTransfers() {
+        return List.copyOf(transfers.values());
+    }
+
+    @Override
+    public List<Entry> storeEntries(List<Entry> values) {
+        values.forEach(entry -> {
+            if (entries.putIfAbsent(entry.getId(), entry) != null) {
+                throw new IllegalStateException("entry already exists: " + entry.getId());
+            }
+            trace.record(now.instant(), "entry-saved id=" + entry.getId()
+                    + " posting=" + entry.getPostingId());
+        });
+        return List.copyOf(values);
+    }
+
+    @Override
+    public List<Entry> findEntriesByTransferId(UUID transferId) {
+        return entries.values().stream()
+                .filter(entry -> transferId.equals(entry.getTransferId()))
+                .sorted(Comparator.comparing(Entry::getCreatedAt).thenComparing(Entry::getId))
+                .toList();
+    }
+
+    @Override
+    public List<Entry> findEntries(Instant from, Instant to) {
+        return entries.values().stream()
+                .filter(entry -> !entry.getCreatedAt().isBefore(from))
+                .filter(entry -> entry.getCreatedAt().isBefore(to))
+                .sorted(Comparator.comparing(Entry::getCreatedAt).thenComparing(Entry::getId))
+                .toList();
+    }
+
+    @Override
+    public List<Entry> findAllEntries() {
+        return entries.values().stream()
+                .sorted(Comparator.comparing(Entry::getCreatedAt).thenComparing(Entry::getId))
+                .toList();
+    }
+
+    @Override
+    public Policy storePolicy(Policy policy) {
+        policies.put(policy.getId(), policy);
+        trace.record(now.instant(), "policy-saved id=" + policy.getId());
+        return policy;
+    }
+
+    @Override
+    public boolean policyNameAndVersionExists(String name, int version) {
+        return policies.values().stream()
+                .anyMatch(policy -> policy.getName().equals(name) && policy.getVersion() == version);
+    }
+
+    @Override
+    public int deactivateAllPolicies() {
+        int deactivated = 0;
+        for (Policy policy : policies.values()) {
+            if (policy.isActive()) {
+                policy.deactivate();
+                deactivated++;
+            }
+        }
+        return deactivated;
+    }
+
+    @Override
     public Optional<Policy> findPolicyById(UUID id) {
         return Optional.ofNullable(policies.get(id));
     }
@@ -166,6 +404,13 @@ final class InMemoryStores
         return policies.values().stream()
                 .filter(Policy::isActive)
                 .max(Comparator.comparing(Policy::getCreatedAt).thenComparing(Policy::getId));
+    }
+
+    @Override
+    public Rule storeRule(Rule rule) {
+        rules.put(rule.getId(), rule);
+        trace.record(now.instant(), "rule-saved id=" + rule.getId());
+        return rule;
     }
 
     @Override

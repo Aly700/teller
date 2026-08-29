@@ -186,6 +186,79 @@ class AwsTransportIntegrationTest extends LocalStackIntegrationTest {
                 .contents()).hasSize(1);
     }
 
+    @Test
+    @Order(4)
+    void exportsLedgerEntriesToS3AndReconcilesThemWithStoredBalances() throws Exception {
+        String policyResponse = mockMvc.perform(post("/policies")
+                        .header("X-API-Key", "integration-key")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"reconciliation-%s\",\"version\":1}"
+                                .formatted(UUID.randomUUID())))
+                .andExpect(status().isCreated())
+                .andReturn().getResponse().getContentAsString();
+        String policyId = objectMapper.readTree(policyResponse).get("id").asText();
+        mockMvc.perform(post("/policies/{id}/rules", policyId)
+                        .header("X-API-Key", "integration-key")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"toolNameGlob":"ledger.transfer","riskTier":"MEDIUM",
+                                 "effect":"ALLOW","precedence":10,"currency":"USD"}
+                                """))
+                .andExpect(status().isCreated());
+
+        String sourceId = createAccount("USD");
+        String destinationId = createAccount("USD");
+        mockMvc.perform(post("/accounts/{id}/deposits", sourceId)
+                        .header("X-API-Key", "integration-key")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"amountMinor\":2000}"))
+                .andExpect(status().isOk());
+        mockMvc.perform(post("/transfers")
+                        .header("X-API-Key", "integration-key")
+                        .header("Idempotency-Key", "reconciliation-transfer-" + UUID.randomUUID())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"fromAccountId":"%s","toAccountId":"%s",
+                                 "amountMinor":500,"currency":"USD","initiatedBy":"reconciler"}
+                                """.formatted(sourceId, destinationId)))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.state").value("POSTED"));
+
+        LocalDate date = LocalDate.now(ZoneOffset.UTC);
+        String response = mockMvc.perform(post("/admin/reconciliation")
+                        .header("X-API-Key", "integration-key")
+                        .param("date", date.toString()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("MATCHED"))
+                .andExpect(jsonPath("$.databaseRowCount").value(4))
+                .andExpect(jsonPath("$.exportRowCount").value(4))
+                .andReturn().getResponse().getContentAsString();
+
+        String entryObjectKey = objectMapper.readTree(response).get("entryObjectKey").asText();
+        String jsonLines = s3Client.getObjectAsBytes(GetObjectRequest.builder()
+                        .bucket(BUCKET_NAME)
+                        .key(entryObjectKey)
+                        .build())
+                .asUtf8String();
+        assertThat(jsonLines.lines()).hasSize(4).allSatisfy(line ->
+                assertThat(line).contains("\"currency\":\"USD\"", "\"postingId\""));
+        mockMvc.perform(get("/admin/reconciliation/latest")
+                        .header("X-API-Key", "integration-key"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("MATCHED"))
+                .andExpect(jsonPath("$.entryObjectKey").value(entryObjectKey));
+    }
+
+    private String createAccount(String currency) throws Exception {
+        String response = mockMvc.perform(post("/accounts")
+                        .header("X-API-Key", "integration-key")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"currency\":\"%s\"}".formatted(currency)))
+                .andExpect(status().isCreated())
+                .andReturn().getResponse().getContentAsString();
+        return objectMapper.readTree(response).get("id").asText();
+    }
+
     private CreatedApproval createApprovalRequiredDecision() throws Exception {
         String policyName = "aws-policy-" + UUID.randomUUID();
         String policyResponse = mockMvc.perform(post("/policies")

@@ -4,7 +4,7 @@ import org.springframework.stereotype.Component;
 import tools.jackson.databind.ObjectMapper;
 
 @Component
-public final class ApprovalMessageCodec {
+public class ApprovalMessageCodec {
 
     private final ObjectMapper objectMapper;
 

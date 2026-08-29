@@ -48,6 +48,10 @@ public class Policy {
         return new Policy(id, name, version, createdAt);
     }
 
+    public void deactivate() {
+        active = false;
+    }
+
     public UUID getId() {
         return id;
     }

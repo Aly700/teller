@@ -5,10 +5,15 @@ import org.springframework.stereotype.Component;
 
 @Component
 @ConditionalOnProperty(name = "teller.aws.enabled", havingValue = "false", matchIfMissing = true)
-public final class DisabledAuditObjectStore implements AuditObjectStore {
+public class DisabledAuditObjectStore implements AuditObjectStore {
 
     @Override
     public void put(String objectKey, byte[] jsonLines) {
+        throw new ExportUnavailableException("S3 audit export is disabled");
+    }
+
+    @Override
+    public byte[] get(String objectKey) {
         throw new ExportUnavailableException("S3 audit export is disabled");
     }
 }

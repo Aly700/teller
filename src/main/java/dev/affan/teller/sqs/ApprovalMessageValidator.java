@@ -4,7 +4,7 @@ import dev.affan.teller.domain.Approval;
 import org.springframework.stereotype.Component;
 
 @Component
-public final class ApprovalMessageValidator {
+public class ApprovalMessageValidator {
 
     public void validate(ApprovalMessage message, Approval approval) {
         if (!approval.getId().equals(message.approvalId())) {

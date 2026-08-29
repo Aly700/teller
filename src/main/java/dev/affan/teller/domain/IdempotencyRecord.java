@@ -33,6 +33,16 @@ public class IdempotencyRecord {
     protected IdempotencyRecord() {
     }
 
+    private IdempotencyRecord(String key, String requestHash, Instant createdAt) {
+        this.key = Objects.requireNonNull(key, "key");
+        this.requestHash = Objects.requireNonNull(requestHash, "requestHash");
+        this.createdAt = Objects.requireNonNull(createdAt, "createdAt");
+    }
+
+    public static IdempotencyRecord claim(String key, String requestHash, Instant createdAt) {
+        return new IdempotencyRecord(key, requestHash, createdAt);
+    }
+
     public void complete(int statusCode, String responseBody) {
         if (this.statusCode != null || this.responseBody != null) {
             throw new IllegalStateException("idempotency response is already complete");

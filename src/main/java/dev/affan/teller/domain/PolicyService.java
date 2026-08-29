@@ -11,14 +11,14 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 public class PolicyService {
 
-    private final PolicyRepository policies;
-    private final RuleRepository rules;
+    private final PolicyStore policies;
+    private final RuleStore rules;
     private final AuditService auditService;
     private final Clock clock;
 
     public PolicyService(
-            PolicyRepository policies,
-            RuleRepository rules,
+            PolicyStore policies,
+            RuleStore rules,
             AuditService auditService,
             Clock clock) {
         this.policies = policies;
@@ -30,11 +30,11 @@ public class PolicyService {
     @Transactional
     public Policy createPolicy(CreatePolicyCommand command) {
         String name = command.name().trim();
-        if (policies.existsByNameAndVersion(name, command.version())) {
+        if (policies.policyNameAndVersionExists(name, command.version())) {
             throw new ConflictException("policy name and version already exist");
         }
-        policies.deactivateAll();
-        Policy policy = policies.save(Policy.create(
+        policies.deactivateAllPolicies();
+        Policy policy = policies.storePolicy(Policy.create(
                 UUID.randomUUID(), name, command.version(), clock.instant()));
         auditService.append(
                 AuditEventType.POLICY_CREATED,
@@ -46,10 +46,10 @@ public class PolicyService {
 
     @Transactional
     public Rule addRule(UUID policyId, CreateRuleCommand command) {
-        policies.findById(policyId)
+        policies.findPolicyById(policyId)
                 .orElseThrow(() -> new ResourceNotFoundException("policy", policyId));
         validateRegex(command.argumentRegex());
-        Rule rule = rules.save(Rule.create(
+        Rule rule = rules.storeRule(Rule.create(
                 UUID.randomUUID(),
                 policyId,
                 command.toolNameGlob(),

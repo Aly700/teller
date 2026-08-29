@@ -85,20 +85,26 @@ class LedgerIntegrationTest {
         Account source = accountWithDeposit(5_000);
         Account destination = transferService.createAccount("USD");
         Transfer transfer = createTransfer(source, destination, 1_000, "db-invariant");
+        UUID postingId = entries.findByTransferIdOrderByCreatedAtAscIdAsc(transfer.getId())
+                .getFirst()
+                .getPostingId();
         TransactionTemplate transaction = new TransactionTemplate(transactionManager);
 
         assertThatThrownBy(() -> transaction.executeWithoutResult(status -> jdbcTemplate.update(
                         """
-                        insert into entries(id, transfer_id, account_id, direction, amount_minor, created_at)
-                        values (?, ?, ?, 'DEBIT', 1, ?)
+                        insert into entries(
+                            id, posting_id, transfer_id, account_id, direction,
+                            amount_minor, currency, created_at
+                        ) values (?, ?, ?, ?, 'DEBIT', 1, 'USD', ?)
                         """,
                         UUID.randomUUID(),
+                        postingId,
                         transfer.getId(),
                         source.getId(),
                         java.sql.Timestamp.from(clock.instant()))))
                 .rootCause()
-                .hasMessageContaining("transfer %s entries are not balanced (signed total -1)"
-                        .formatted(transfer.getId()));
+                .hasMessageContaining("posting %s entries are not balanced (signed total -1)"
+                        .formatted(postingId));
     }
 
     @Test

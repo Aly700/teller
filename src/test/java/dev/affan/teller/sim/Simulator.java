@@ -17,6 +17,7 @@ final class Simulator extends Clock {
     private final PriorityQueue<Event> events = new PriorityQueue<>();
     private Instant now;
     private long sequence;
+    private long completedSteps;
 
     Simulator(long seed, Instant initialTime, Trace trace) {
         this.seed = seed;
@@ -38,6 +39,10 @@ final class Simulator extends Clock {
 
     int nextInt(int bound) {
         return random.nextInt(bound);
+    }
+
+    long nextLong(long bound) {
+        return random.nextLong(bound);
     }
 
     void scheduleNow(String name, Runnable action) {
@@ -64,6 +69,7 @@ final class Simulator extends Clock {
         now = event.at();
         trace.record(now, "event=" + event.name());
         event.action().run();
+        completedSteps++;
         return event.name();
     }
 
@@ -73,6 +79,10 @@ final class Simulator extends Clock {
 
     int pendingEvents() {
         return events.size();
+    }
+
+    long completedSteps() {
+        return completedSteps;
     }
 
     void runUntilIdle(int maxSteps, Runnable afterEachStep) {
