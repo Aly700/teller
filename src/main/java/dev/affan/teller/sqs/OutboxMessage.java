@@ -3,16 +3,20 @@ package dev.affan.teller.sqs;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
+import jakarta.persistence.PostLoad;
+import jakarta.persistence.PostPersist;
 import jakarta.persistence.Table;
+import jakarta.persistence.Transient;
 import java.time.Instant;
 import java.util.Objects;
 import java.util.UUID;
 import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.type.SqlTypes;
+import org.springframework.data.domain.Persistable;
 
 @Entity
 @Table(name = "outbox_messages")
-public class OutboxMessage {
+public class OutboxMessage implements Persistable<UUID> {
 
     @Id
     private UUID id;
@@ -38,6 +42,9 @@ public class OutboxMessage {
 
     @Column(name = "last_error")
     private String lastError;
+
+    @Transient
+    private boolean newEntity = true;
 
     protected OutboxMessage() {
     }
@@ -81,8 +88,20 @@ public class OutboxMessage {
         lastError = Objects.requireNonNull(error, "error");
     }
 
+    @Override
     public UUID getId() {
         return id;
+    }
+
+    @Override
+    public boolean isNew() {
+        return newEntity;
+    }
+
+    @PostLoad
+    @PostPersist
+    void markNotNew() {
+        newEntity = false;
     }
 
     public String getAggregateType() {

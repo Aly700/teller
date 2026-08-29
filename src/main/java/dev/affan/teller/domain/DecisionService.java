@@ -1,6 +1,7 @@
 package dev.affan.teller.domain;
 
 import dev.affan.teller.rules.ProposedCall;
+import dev.affan.teller.rules.PolicyCache;
 import dev.affan.teller.rules.RuleEvaluation;
 import dev.affan.teller.rules.RulesEngine;
 import dev.affan.teller.sqs.ApprovalMessage;
@@ -11,7 +12,6 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.LinkedHashMap;
-import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import org.springframework.beans.factory.annotation.Value;
@@ -21,8 +21,7 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 public class DecisionService {
 
-    private final PolicyStore policies;
-    private final RuleStore rules;
+    private final PolicyCache policyCache;
     private final DecisionStore decisions;
     private final ApprovalStore approvals;
     private final RulesEngine rulesEngine;
@@ -33,8 +32,7 @@ public class DecisionService {
     private final Duration approvalTtl;
 
     public DecisionService(
-            PolicyStore policies,
-            RuleStore rules,
+            PolicyCache policyCache,
             DecisionStore decisions,
             ApprovalStore approvals,
             RulesEngine rulesEngine,
@@ -43,8 +41,7 @@ public class DecisionService {
             AuditService auditService,
             Clock clock,
             @Value("${teller.approval.ttl:PT30M}") Duration approvalTtl) {
-        this.policies = policies;
-        this.rules = rules;
+        this.policyCache = policyCache;
         this.decisions = decisions;
         this.approvals = approvals;
         this.rulesEngine = rulesEngine;
@@ -57,23 +54,23 @@ public class DecisionService {
 
     @Transactional
     public DecisionOutcome evaluate(EvaluateDecisionCommand command) {
-        Policy policy = policies.findPolicyById(command.policyId())
-                .orElseThrow(() -> new ResourceNotFoundException("policy", command.policyId()));
+        PolicyCache.PolicyRules policyRules = policyCache.get(command.policyId());
         ProposedCall proposedCall = new ProposedCall(
                 command.agentId(),
                 command.toolName(),
                 command.argumentsJson(),
                 command.riskTier());
-        return evaluate(policy, proposedCall, true);
+        return evaluate(policyRules, proposedCall, true);
     }
 
-    @Transactional
-    public DecisionOutcome evaluateTransfer(
+    DecisionOutcome evaluateTransfer(
             EvaluateTransferPolicyCommand command,
-            boolean createApproval) {
-        Policy policy = policies.findPolicyById(command.policyId())
-                .filter(Policy::isActive)
-                .orElseThrow(() -> new ConflictException("transfer policy is no longer active"));
+            boolean createApproval,
+            PolicyCache.PolicyRules policyRules) {
+        Policy policy = policyRules.policy();
+        if (!policy.getId().equals(command.policyId()) || !policy.isActive()) {
+            throw new ConflictException("transfer policy is no longer active");
+        }
         Money money = command.money();
         String argumentsJson = ("{\"amountMinor\":%d,\"currency\":\"%s\","
                 + "\"fromAccountId\":\"%s\",\"toAccountId\":\"%s\"}")
@@ -92,16 +89,16 @@ public class DecisionService {
                 command.fromAccountId(),
                 command.toAccountId(),
                 command.velocityCounts());
-        return evaluate(policy, proposedCall, createApproval);
+        return evaluate(policyRules, proposedCall, createApproval);
     }
 
     private DecisionOutcome evaluate(
-            Policy policy,
+            PolicyCache.PolicyRules policyRules,
             ProposedCall proposedCall,
             boolean createApproval) {
-        List<Rule> orderedRules = rules.findRulesByPolicyId(policy.getId());
+        Policy policy = policyRules.policy();
         RuleEvaluation evaluation = rulesEngine.evaluate(
-                orderedRules.stream().map(Rule::toDefinition).toList(),
+                policyRules.rules().stream().map(Rule::toDefinition).toList(),
                 proposedCall);
         Instant now = clock.instant();
         Decision decision = decisions.storeDecision(Decision.create(

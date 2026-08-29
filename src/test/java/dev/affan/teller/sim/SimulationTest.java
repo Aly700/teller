@@ -21,6 +21,7 @@ import dev.affan.teller.domain.TransferService;
 import dev.affan.teller.domain.TransferSettlementService;
 import dev.affan.teller.domain.TransferState;
 import dev.affan.teller.rules.RulesEngine;
+import dev.affan.teller.rules.PolicyCache;
 import dev.affan.teller.sqs.ApprovalExpiryWorker;
 import dev.affan.teller.sqs.ApprovalMessageCodec;
 import dev.affan.teller.sqs.ApprovalMessageValidator;
@@ -85,9 +86,9 @@ class SimulationTest {
             Invariants invariants = new Invariants(stores, bus);
 
             AuditService auditService = new AuditService(stores.auditStore(), objectMapper, simulator);
+            PolicyCache policyCache = new PolicyCache(stores.policyStore(), stores.ruleStore());
             DecisionService decisionService = new DecisionService(
-                    stores.policyStore(),
-                    stores.ruleStore(),
+                    policyCache,
                     stores.decisionStore(),
                     stores.approvalStore(),
                     new RulesEngine(),
@@ -109,13 +110,13 @@ class SimulationTest {
                     new ApprovalMessageValidator(),
                     settlementService);
             PolicyService policyService = new PolicyService(
-                    stores.policyStore(), stores.ruleStore(), auditService, simulator);
+                    stores.policyStore(), stores.ruleStore(), auditService, policyCache, simulator);
             TransferService transferService = new TransferService(
                     stores.accountStore(),
                     stores.transferStore(),
                     stores.entryStore(),
                     stores.policyStore(),
-                    stores.ruleStore(),
+                    policyCache,
                     decisionService,
                     auditService,
                     simulator);

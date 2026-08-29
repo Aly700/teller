@@ -5,14 +5,20 @@ import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
 import jakarta.persistence.Id;
+import jakarta.persistence.PostLoad;
+import jakarta.persistence.PostPersist;
 import jakarta.persistence.Table;
+import jakarta.persistence.Transient;
 import java.time.Instant;
 import java.util.Objects;
 import java.util.UUID;
+import org.hibernate.annotations.Immutable;
+import org.springframework.data.domain.Persistable;
 
 @Entity
+@Immutable
 @Table(name = "entries")
-public class Entry {
+public class Entry implements Persistable<UUID> {
 
     @Id
     private UUID id;
@@ -38,6 +44,9 @@ public class Entry {
 
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
+
+    @Transient
+    private boolean newEntity = true;
 
     protected Entry() {
     }
@@ -91,7 +100,16 @@ public class Entry {
         return direction.signed(amountMinor);
     }
 
+    @Override
     public UUID getId() { return id; }
+
+    @Override
+    public boolean isNew() { return newEntity; }
+
+    @PostLoad
+    @PostPersist
+    void markNotNew() { newEntity = false; }
+
     public UUID getPostingId() { return postingId; }
     public UUID getTransferId() { return transferId; }
     public UUID getAccountId() { return accountId; }

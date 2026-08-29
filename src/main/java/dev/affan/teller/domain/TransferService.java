@@ -1,5 +1,6 @@
 package dev.affan.teller.domain;
 
+import dev.affan.teller.rules.PolicyCache;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.Comparator;
@@ -17,7 +18,7 @@ public class TransferService {
     private final TransferStore transfers;
     private final EntryStore entries;
     private final PolicyStore policies;
-    private final RuleStore rules;
+    private final PolicyCache policyCache;
     private final DecisionService decisionService;
     private final AuditService auditService;
     private final Clock clock;
@@ -27,7 +28,7 @@ public class TransferService {
             TransferStore transfers,
             EntryStore entries,
             PolicyStore policies,
-            RuleStore rules,
+            PolicyCache policyCache,
             DecisionService decisionService,
             AuditService auditService,
             Clock clock) {
@@ -35,7 +36,7 @@ public class TransferService {
         this.transfers = transfers;
         this.entries = entries;
         this.policies = policies;
-        this.rules = rules;
+        this.policyCache = policyCache;
         this.decisionService = decisionService;
         this.auditService = auditService;
         this.clock = clock;
@@ -81,7 +82,8 @@ public class TransferService {
 
         Policy policy = policies.findActivePolicy()
                 .orElseThrow(() -> new ConflictException("no active policy is configured"));
-        Map<Long, Long> velocityCounts = velocityCounts(policy, source.getId(), clock.instant());
+        PolicyCache.PolicyRules policyRules = policyCache.get(policy);
+        Map<Long, Long> velocityCounts = velocityCounts(policyRules.rules(), source.getId(), clock.instant());
         boolean reservationAvailable = source.getAvailableBalanceMinor() >= money.minorUnits();
         DecisionOutcome outcome = decisionService.evaluateTransfer(
                 new EvaluateTransferPolicyCommand(
@@ -91,7 +93,8 @@ public class TransferService {
                         destination.getId(),
                         money,
                         velocityCounts),
-                reservationAvailable);
+                reservationAvailable,
+                policyRules);
         Transfer transfer = Transfer.pending(
                 UUID.randomUUID(),
                 command.idempotencyKey(),
@@ -162,9 +165,9 @@ public class TransferService {
         transfer.hold(outcome.approval().getId());
     }
 
-    private Map<Long, Long> velocityCounts(Policy policy, UUID sourceAccountId, Instant now) {
+    private Map<Long, Long> velocityCounts(List<Rule> rules, UUID sourceAccountId, Instant now) {
         Map<Long, Long> counts = new LinkedHashMap<>();
-        rules.findRulesByPolicyId(policy.getId()).stream()
+        rules.stream()
                 .map(Rule::getVelocityWindowSeconds)
                 .filter(java.util.Objects::nonNull)
                 .distinct()

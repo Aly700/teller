@@ -42,7 +42,7 @@ public class Approval {
     private Instant createdAt;
 
     @Version
-    private long version;
+    private Long version;
 
     protected Approval() {
     }
