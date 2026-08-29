@@ -9,3 +9,5 @@ infra/node_modules/
 infra/cdk.out/
 infra/dist/
 .jqwik-database
+console/node_modules/
+console/dist/
