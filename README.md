@@ -3,13 +3,13 @@
 
 > **Scope.** Teller is a *simulated* payments core built as a portfolio project. It moves no real money, connects to no payment rails or banks, and every account, transfer and currency in its examples is synthetic. Its purpose is to show how a policy-gated double-entry ledger is built and proven correct on the Java / Spring Boot / PostgreSQL / AWS stack.
 
-Teller is a Java 21/Spring Boot payments core with a policy gate. It keeps money as `long` minor units plus ISO-4217 currency, posts balanced double-entry ledger rows, reserves funds for four-eyes approval, and checks its correctness under seeded transport and process faults.
+This simulated Java 21/Spring Boot payments core keeps money as `long` minor units plus ISO-4217 currency, posts balanced double-entry ledger rows, reserves funds for four-eyes approval, and checks its correctness under seeded transport and process faults.
 
 ## Problem
 
 A transfer API has to answer two questions atomically: “may this payment proceed?” and “what happened to the money?” A policy allow must post once, a deny must move nothing, and an approval hold must reduce spendable funds without changing the ledger until a second reviewer acts. Timeouts, duplicate messages, process crashes, concurrent debits, and expired reviews cannot create money or strand a reservation.
 
-Teller deliberately remains a demo payments core. It does not connect to card networks, banks, customer data, or real payment rails.
+All flows below are simulations over synthetic data. Teller has no connection to external financial systems or non-synthetic account data.
 
 ## Architecture
 
@@ -40,13 +40,21 @@ The API, SQS worker, outbox relay, approval expiry, export, reconciliation sched
 
 Rules can match amount bounds, currency, per-source velocity, counterparty allow/deny lists, and a four-eyes threshold. Lower precedence numbers run first; no match is a deny.
 
+The main design decisions are recorded in five short ADRs:
+
+- [ADR 0001: Minor units and currency](docs/adr/0001-minor-units-and-currency.md)
+- [ADR 0002: Balanced entries through deferred triggers](docs/adr/0002-balanced-entries-deferred-trigger.md)
+- [ADR 0003: Reservations and account concurrency](docs/adr/0003-reservations-and-optimistic-locking.md)
+- [ADR 0004: Reuse the policy gate](docs/adr/0004-policy-gate-reuse.md)
+- [ADR 0005: Simulation found a missing-entry bug](docs/adr/0005-simulation-found-bug.md)
+
 ## Correctness
 
 Money is never represented as floating point. Each `Money` value is a signed-safe Java `long` count of minor units and a three-letter ISO currency. A transfer locks both accounts in UUID order, checks currency and available funds, and commits its decision, ledger effects, approval, audit, and outbox state transactionally.
 
 Every posting has one currency and at least two rows. PostgreSQL deferred constraint triggers reject a posting whose signed credits minus debits is non-zero at commit. Reversal of a posted transfer appends compensating rows; immutable entries are never edited.
 
-The seeded simulator drives the real transfer, policy, approval, expiry, idempotency, outbox, and worker services through an in-memory port layer, virtual clock, and fault-injecting bus. It checks after every step and again after quiescence:
+The seeded simulator drives the application's transfer, policy, approval, expiry, idempotency, outbox, and worker services through an in-memory port layer, virtual clock, and fault-injecting bus. It checks after every step and again after quiescence:
 
 1. Entry sums are zero per currency and per posting.
 2. Each account ledger balance equals the sum of its customer-facing posted entries.
@@ -57,9 +65,9 @@ The seeded simulator drives the real transfer, policy, approval, expiry, idempot
 7. Audit records remain append-only and ordered per aggregate.
 8. Every outbox row is sent and has exactly one consumer effect despite duplicate or reordered delivery.
 
-The latest verified 200-seed run generated `target/sim-coverage.json` in **2,093 ms** and recorded **46,663 steps** and **6,879 transfers**: 4,320 denied, 1,959 posted, and 600 reversed. It injected 453 crashes after commit, 466 crashes before commit, 299 delays, 256 drop/redeliveries, 332 duplicates, 327 reorderings, and 120 visibility redeliveries. `-Dsim.seed=<n>` reruns one scenario and prints its trace if an invariant fails.
+The captured `target/sim-coverage.json` run covered **2,000 seeds**, **467,258 steps**, and **69,043 transfers** across `DENIED`, `POSTED`, and `REVERSED` terminal states. Its injected faults covered crashes before commit, crashes after commit, delays, drop-then-redelivery, duplicates, reorderings, and visibility redeliveries. `-Dsim.seed=<n>` reruns one scenario and prints its trace if an invariant fails.
 
-The harness found a real ledger defect during development. Demo deposits updated `accounts.ledger_balance_minor` and `available_balance_minor` and wrote an audit row, but wrote **zero ledger entries**. A funded account therefore had a cached ledger balance of 10,000 while the sum of its posted entries was 0. Deposits now append one customer credit and one external-funding debit under a shared posting ID, restoring both account reconstruction and global conservation.
+The simulator found that synthetic deposits increased both cached account balances and wrote an audit row but created no ledger entries, leaving `ledger_balance_minor` nonzero while the account's posted-entry sum remained zero.
 
 Reconciliation runs in a PostgreSQL repeatable-read transaction, exports entries and audit into unique immutable keys below `entries/dt=YYYY-MM-DD/` and `audit/dt=YYYY-MM-DD/`, then compares exact entry identities/content, row counts, per-currency debit/credit amounts, and every cached account ledger balance. A mismatch persists a run, appends `RECONCILIATION_MISMATCH`, and increments `teller.reconciliation.mismatch`.
 
@@ -79,7 +87,7 @@ Transport is at least once; Teller makes each observable effect idempotent:
 
 ## Performance
 
-> **LEAD CAPTURE PLACEHOLDER:** AWS k6 measurements have not been captured for Teller yet. The lead will replace this block with throughput, latency percentiles, error count, ECS CPU/memory, and RDS CPU/connections from the same captured run. No live performance number is claimed here.
+> AWS k6 measurements have not been captured for Teller. Throughput, latency percentiles, error count, ECS CPU/memory, and RDS CPU/connections remain pending a manual run in an isolated demo environment.
 
 `load/transfers.js` creates a synthetic USD policy and pair of accounts in `setup()`, funds the source, then posts a repeatable mix of 4,000-unit `ALLOW`, 6,000-unit `REQUIRE_APPROVAL`, and 12,000-unit `DENY` transfers with unique idempotency keys. It refuses to run unless the operator explicitly confirms an isolated demo target:
 
@@ -130,7 +138,7 @@ npm --prefix console run build
 ./mvnw -o -q -DskipTests package
 ```
 
-Synthesize or deploy with an existing `teller` ECR image tag:
+Synthesize or deploy to an isolated demo AWS account with an existing `teller` ECR image tag:
 
 ```bash
 cd infra
@@ -277,10 +285,10 @@ On a Docker host, the complete suite adds PostgreSQL and LocalStack coverage for
 
 ## What was left out
 
-- Real payment rails, card or bank connectivity
+- Connections to payment rails or financial institutions
 - KYC, sanctions screening, and customer identity data
 - FX and multi-currency conversion
-- Production overdraft products
+- Overdraft support
 - OAuth and fine-grained reviewer authorization
 - Kafka, Kubernetes, and multi-region deployment
 - NAT gateways, an Application Load Balancer, and a separate console hosting stack
@@ -289,4 +297,4 @@ These would materially expand regulatory, security, operational, or cost scope w
 
 ## Status
 
-As of 2026-08-29, Tasks A–D are committed and passed **86/86 tests with Docker** at `fc73b50`. This Task E/Task F working tree adds the approvals console, approval reasons/join endpoints, Teller metrics, named CDK resources, alarms/dashboard, runbook, load script, and case-study documentation. Its offline gates are documented above; the lead still owns the Docker rerun and AWS performance/chaos capture. The repository remains local until its owner chooses to publish it.
+Verified locally with Docker: **92 Java tests**, **9 Vitest tests**, and a **2,000-seed simulation**. AWS deployment is pending capture by hand. The pipeline has not been exercised. The repository is not public.

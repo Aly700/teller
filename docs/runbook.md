@@ -1,6 +1,6 @@
 # Teller operations runbook
 
-Start with the `Teller` CloudWatch dashboard, then correlate the alarm window with the `teller-application` log group. Teller never talks to real payment rails, but approval and ledger mutations are durable: diagnose the source before replaying or retrying work.
+Teller is a simulated payments core that uses synthetic data and has no connection to external financial systems. For an isolated demo deployment, start with the `Teller` CloudWatch dashboard, then correlate the alarm window with the `teller-application` log group. Approval and ledger mutations are durable within the simulation, so diagnose the source before replaying or retrying work.
 
 ## HTTP 5xx alarm
 
@@ -57,4 +57,4 @@ If `teller.reconciliation.mismatch` increments:
 
 ## Local rehearsal
 
-Use the README Compose walkthrough and synthetic accounts only. `load/transfers.js` refuses to start without `CONFIRM_DEMO_TARGET=true`; never point it at customer or production payment data.
+Use the README Compose walkthrough and synthetic accounts only. `load/transfers.js` refuses to start without `CONFIRM_DEMO_TARGET=true`; never point it at non-synthetic data.
