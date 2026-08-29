@@ -321,6 +321,9 @@ These would materially expand regulatory, security, operational, or cost scope w
   task sizes before and after tuning, chaos-tested (task kill with held transfers; poison message → DLQ →
   replay), then destroyed. Every number in this README comes from those runs and is recorded under
   [docs/evidence/](docs/evidence/). The account holds no running resources.
-- CI/CD: the GitHub Actions workflows and the OIDC deploy role are defined and synthesize but have **not
-  been exercised** — the repository is not public yet.
+- CI/CD: exercised on 2026-08-29 from a private GitHub repository — CI (97 Java tests with Testcontainers on
+  the Ubuntu runner, plus the console's Vitest suite) is green, and the Deploy workflow (manual dispatch →
+  OIDC assume-role → Maven → Docker → ECR → `cdk deploy` of the six app stacks; run 33264022788, commit
+  `fb79257`) deployed the service, which then passed the same assertion walkthrough recorded in
+  [docs/evidence/](docs/evidence/). No static AWS keys exist anywhere in the pipeline.
 - This is a simulated payments core: synthetic data only, no real money, no external financial systems.
