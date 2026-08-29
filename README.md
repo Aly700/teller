@@ -87,9 +87,26 @@ Transport is at least once; Teller makes each observable effect idempotent:
 
 ## Performance
 
-> AWS k6 measurements have not been captured for Teller. Throughput, latency percentiles, error count, ECS CPU/memory, and RDS CPU/connections remain pending a manual run in an isolated demo environment.
+Measured on the deployed service (us-east-1, one Fargate task, RDS db.t4g.micro) with `load/transfers.js`
+— a 5 → 20 → 50 rps ramp over 80 s of mixed ALLOW / DENY / REQUIRE_APPROVAL transfers. Every k6 state
+check passed and no request failed on any run; the differences are capacity.
 
-`load/transfers.js` creates a synthetic USD policy and pair of accounts in `setup()`, funds the source, then posts a repeatable mix of 4,000-unit `ALLOW`, 6,000-unit `REQUIRE_APPROVAL`, and 12,000-unit `DENY` transfers with unique idempotency keys. It refuses to run unless the operator explicitly confirms an isolated demo target:
+| Build | Task size | Sustained rps | median | p95 | p99 | ECS CPU |
+|---|---|---:|---:|---:|---:|---|
+| untuned (default JVM flags, Hikari 10, no policy cache), cold JVM | 0.25 vCPU / 0.5 GB | 7.1 | 13.9 s | 17.0 s | 17.4 s | 100% |
+| untuned, warm JVM | 0.25 vCPU / 0.5 GB | 15.1 | 4.9 s | 8.7 s | 9.1 s | 100% |
+| untuned, cold JVM | 0.5 vCPU / 1 GB | 18.4 | 4.0 s | 6.0 s | 6.5 s | 100% |
+| **tuned** (SerialGC + first-tier JIT, Hikari 5, policy cache, 12 statements per transfer) | 0.25 vCPU / 0.5 GB | 24.3 | 2.9 s | 3.6 s | 3.8 s | 99% |
+| **tuned** | 0.5 vCPU / 1 GB | **34.3 (profile max)** | **76 ms** | 447 ms | 792 ms | 70–81% |
+
+RDS never exceeded 7% CPU in any run: the task was CPU-bound every time. A transfer does much more than
+a policy decision — policy evaluation, row-locked account updates, balanced entries, reservation
+bookkeeping, audit and outbox rows in one transaction — which is why a quarter core saturates around
+24 rps even after tuning. The 12-statement figure is measured with Hibernate statistics on PostgreSQL in
+the test suite (`TransferStatementCountIntegrationTest`); the pre-tuning count was not measured on a
+database and is not claimed. Details: [docs/evidence/perf.md](docs/evidence/perf.md).
+
+Run the same profile:
 
 ```bash
 BASE_URL='http://<task-public-ip>:8080' API_KEY='<api-key>' \
@@ -297,4 +314,13 @@ These would materially expand regulatory, security, operational, or cost scope w
 
 ## Status
 
-Verified locally with Docker: **92 Java tests**, **9 Vitest tests**, and a **2,000-seed simulation**. AWS deployment is pending capture by hand. The pipeline has not been exercised. The repository is not public.
+- Local: `docker compose up` runs the full flow; **97 Java tests** (Testcontainers PostgreSQL + LocalStack,
+  including a concurrent-drain test and a DB-level imbalanced-posting rejection) and **9 Vitest tests** pass;
+  the **2,000-seed simulation** with money invariants is green and once caught a real bug (see Correctness).
+- AWS: deployed by hand with `cdk deploy` into a personal account, exercised end to end, load-tested at two
+  task sizes before and after tuning, chaos-tested (task kill with held transfers; poison message → DLQ →
+  replay), then destroyed. Every number in this README comes from those runs and is recorded under
+  [docs/evidence/](docs/evidence/). The account holds no running resources.
+- CI/CD: the GitHub Actions workflows and the OIDC deploy role are defined and synthesize but have **not
+  been exercised** — the repository is not public yet.
+- This is a simulated payments core: synthetic data only, no real money, no external financial systems.
