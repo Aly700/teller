@@ -39,7 +39,10 @@ public class ApiKeyFilter extends OncePerRequestFilter {
     @Override
     protected boolean shouldNotFilter(HttpServletRequest request) {
         String path = request.getRequestURI();
-        return path.equals("/actuator/health") || path.startsWith("/actuator/health/");
+        return path.equals("/actuator/health")
+                || path.startsWith("/actuator/health/")
+                || path.equals("/console")
+                || path.startsWith("/console/");
     }
 
     @Override

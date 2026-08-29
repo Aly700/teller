@@ -6,6 +6,8 @@ import java.util.UUID;
 import org.springframework.data.jpa.repository.JpaRepository;
 
 public interface ApprovalRepository extends JpaRepository<Approval, UUID>, ApprovalStore {
+    List<Approval> findByStatusOrderByCreatedAtAscIdAsc(ApprovalStatus status);
+
     List<Approval> findByStatusAndExpiresAtLessThanEqualOrderByExpiresAtAscIdAsc(
             ApprovalStatus status,
             Instant expiresAt);
@@ -18,6 +20,11 @@ public interface ApprovalRepository extends JpaRepository<Approval, UUID>, Appro
     @Override
     default java.util.Optional<Approval> findApprovalById(UUID id) {
         return findById(id);
+    }
+
+    @Override
+    default List<Approval> findApprovals(ApprovalStatus status) {
+        return findByStatusOrderByCreatedAtAscIdAsc(status);
     }
 
     @Override

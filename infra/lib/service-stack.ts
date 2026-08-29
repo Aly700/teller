@@ -27,12 +27,17 @@ export class ServiceStack extends cdk.Stack {
     super(scope, id, props);
 
     const repository = ecr.Repository.fromRepositoryName(this, 'Repository', 'teller');
-    const cluster = new ecs.Cluster(this, 'Cluster', { vpc: props.vpc });
+    const cluster = new ecs.Cluster(this, 'Cluster', {
+      vpc: props.vpc,
+      clusterName: 'teller-cluster',
+    });
     const logGroup = new logs.LogGroup(this, 'ApplicationLogs', {
+      logGroupName: 'teller-application',
       retention: logs.RetentionDays.ONE_WEEK,
       removalPolicy: cdk.RemovalPolicy.DESTROY,
     });
     const taskDefinition = new ecs.FargateTaskDefinition(this, 'TaskDefinition', {
+      family: 'teller-task',
       cpu: 256,
       memoryLimitMiB: 512,
     });
@@ -75,6 +80,7 @@ export class ServiceStack extends cdk.Stack {
     props.apiKeySecret.grantRead(taskDefinition.taskRole);
 
     const service = new ecs.FargateService(this, 'Service', {
+      serviceName: 'teller-service',
       cluster,
       taskDefinition,
       desiredCount: 1,
@@ -108,6 +114,7 @@ export class ServiceStack extends cdk.Stack {
       defaultValue: 0,
     });
     new cloudwatch.Alarm(this, 'ServerErrorAlarm', {
+      alarmName: 'teller-http-5xx',
       metric: serverErrors.metric({
         statistic: 'Sum',
         period: cdk.Duration.minutes(5),
@@ -118,5 +125,41 @@ export class ServiceStack extends cdk.Stack {
       treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
       alarmDescription: 'Teller emitted at least five HTTP 5xx responses in five minutes',
     });
+
+    const dlqDepth = props.approvalDeadLetterQueue.metricApproximateNumberOfMessagesVisible({
+      statistic: 'Maximum',
+      period: cdk.Duration.minutes(1),
+    });
+    new cloudwatch.Alarm(this, 'DlqDepthAlarm', {
+      alarmName: 'teller-approval-dlq-depth',
+      metric: dlqDepth,
+      threshold: 1,
+      evaluationPeriods: 1,
+      comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
+      treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
+      alarmDescription: 'At least one Teller approval message requires DLQ inspection and replay',
+    });
+
+    const dashboard = new cloudwatch.Dashboard(this, 'OperationsDashboard', {
+      dashboardName: 'Teller',
+    });
+    dashboard.addWidgets(
+      new cloudwatch.GraphWidget({ title: 'HTTP 5xx count', left: [serverErrors.metric({ statistic: 'Sum' })] }),
+      new cloudwatch.GraphWidget({ title: 'Approval DLQ depth', left: [dlqDepth] }),
+      new cloudwatch.GraphWidget({
+        title: 'ECS CPU and memory',
+        left: [
+          service.metricCpuUtilization({ period: cdk.Duration.minutes(1) }),
+          service.metricMemoryUtilization({ period: cdk.Duration.minutes(1) }),
+        ],
+      }),
+      new cloudwatch.GraphWidget({
+        title: 'RDS CPU and connections',
+        left: [
+          props.database.metricCPUUtilization({ period: cdk.Duration.minutes(1) }),
+          props.database.metricDatabaseConnections({ period: cdk.Duration.minutes(1) }),
+        ],
+      }),
+    );
   }
 }

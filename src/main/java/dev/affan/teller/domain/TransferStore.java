@@ -11,6 +11,8 @@ public interface TransferStore {
 
     Optional<Transfer> findTransferById(UUID id);
 
+    Optional<Transfer> findTransferByApprovalId(UUID approvalId);
+
     Optional<Transfer> findLockedTransferById(UUID id);
 
     Optional<Transfer> findLockedTransferByDecisionId(UUID decisionId);
@@ -18,4 +20,9 @@ public interface TransferStore {
     long countTransfers(UUID fromAccountId, Instant createdAt, TransferState excludedState);
 
     List<Transfer> findAllTransfers();
+
+    default long countTransfersByState(TransferState state) {
+        return findAllTransfers().stream().filter(transfer -> transfer.getState() == state).count();
+    }
+
 }

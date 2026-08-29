@@ -308,6 +308,13 @@ final class InMemoryStores
     }
 
     @Override
+    public Optional<Transfer> findTransferByApprovalId(UUID approvalId) {
+        return transfers.values().stream()
+                .filter(transfer -> approvalId.equals(transfer.getApprovalId()))
+                .findFirst();
+    }
+
+    @Override
     public Optional<Transfer> findLockedTransferById(UUID id) {
         return findTransferById(id);
     }
@@ -451,6 +458,14 @@ final class InMemoryStores
     }
 
     @Override
+    public List<Approval> findApprovals(ApprovalStatus status) {
+        return approvals.values().stream()
+                .filter(approval -> approval.getStatus() == status)
+                .sorted(Comparator.comparing(Approval::getCreatedAt).thenComparing(Approval::getId))
+                .toList();
+    }
+
+    @Override
     public List<Approval> findStaleApprovals(ApprovalStatus status, Instant expiresAt) {
         return approvals.values().stream()
                 .filter(approval -> approval.getStatus() == status)
@@ -479,7 +494,7 @@ final class InMemoryStores
         return auditRecords.values().stream()
                 .filter(record -> !record.getOccurredAt().isBefore(from))
                 .filter(record -> record.getOccurredAt().isBefore(to))
-                .sorted(Comparator.comparing(AuditRecord::getOccurredAt).thenComparing(AuditRecord::getId))
+                .sorted(Comparator.comparing(AuditRecord::getOccurredAt).thenComparing(AuditRecord::getId).reversed())
                 .toList();
     }
 

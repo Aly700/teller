@@ -2,6 +2,9 @@ package dev.affan.teller.domain;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import dev.affan.teller.TestcontainersConfiguration;
 import java.time.Clock;
@@ -19,6 +22,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
@@ -26,6 +30,7 @@ import org.springframework.context.annotation.Primary;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
+import org.springframework.test.web.servlet.MockMvc;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 @Testcontainers(disabledWithoutDocker = true)
@@ -36,6 +41,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
         "teller.aws.sqs.worker-enabled=false",
         "teller.approval.ttl=PT1M"
 })
+@AutoConfigureMockMvc
 class LedgerIntegrationTest {
 
     private static final Instant START = Instant.parse("2026-08-29T00:00:00Z");
@@ -43,12 +49,14 @@ class LedgerIntegrationTest {
     @Autowired private TransferService transferService;
     @Autowired private PolicyService policyService;
     @Autowired private ApprovalService approvalService;
+    @Autowired private ApprovalQueueService approvalQueueService;
     @Autowired private EntryRepository entries;
     @Autowired private ApprovalRepository approvals;
     @Autowired private OutboxRepositoryAccess outboxAccess;
     @Autowired private JdbcTemplate jdbcTemplate;
     @Autowired private PlatformTransactionManager transactionManager;
     @Autowired private MutableClock clock;
+    @Autowired private MockMvc mockMvc;
 
     @BeforeEach
     void resetClock() {
@@ -123,7 +131,7 @@ class LedgerIntegrationTest {
     }
 
     @Test
-    void requireApprovalReservesThenApprovePostsInTheExistingTransactionFlow() {
+    void requireApprovalReservesThenApprovePostsInTheExistingTransactionFlow() throws Exception {
         activeRule(Effect.REQUIRE_APPROVAL, null, null, 5_000L);
         Account source = accountWithDeposit(10_000);
         Account destination = transferService.createAccount("USD");
@@ -134,13 +142,28 @@ class LedgerIntegrationTest {
         assertBalances(source.getId(), 10_000, 4_000);
         assertThat(approvals.findById(held.getApprovalId())).isPresent();
         assertThat(outboxAccess.countForApproval(held.getApprovalId())).isEqualTo(1);
+        assertThat(approvalQueueService.getTransfer(held.getApprovalId())).satisfies(details -> {
+            assertThat(details.transferId()).isEqualTo(held.getId());
+            assertThat(details.amountMinor()).isEqualTo(6_000);
+            assertThat(details.fromAccountId()).isEqualTo(source.getId());
+            assertThat(details.toAccountId()).isEqualTo(destination.getId());
+            assertThat(details.matchedRuleId()).isNotNull();
+        });
+        mockMvc.perform(get("/approvals/{id}/transfer", held.getApprovalId())
+                        .header("X-API-Key", "integration-key"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.transferId").value(held.getId().toString()))
+                .andExpect(jsonPath("$.amountMinor").value("6000"))
+                .andExpect(jsonPath("$.matchedRuleId").isNotEmpty());
 
-        approvalService.approve(held.getApprovalId(), "reviewer-two");
+        approvalService.approve(held.getApprovalId(), "reviewer-two", "Invoice verified");
 
         assertThat(transferService.getTransfer(held.getId()).getState()).isEqualTo(TransferState.POSTED);
         assertBalances(source.getId(), 4_000, 4_000);
         assertBalances(destination.getId(), 6_000, 6_000);
         assertThat(entries.findByTransferIdOrderByCreatedAtAscIdAsc(held.getId())).hasSize(2);
+        assertThat(approvals.findById(held.getApprovalId()).orElseThrow().getReason())
+                .isEqualTo("Invoice verified");
     }
 
     @Test

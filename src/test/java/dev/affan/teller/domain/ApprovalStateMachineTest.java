@@ -18,10 +18,11 @@ class ApprovalStateMachineTest {
         Approval approval = pendingApproval();
         Instant decidedAt = CREATED_AT.plusSeconds(60);
 
-        approval.approve("reviewer-1", decidedAt);
+        approval.approve("reviewer-1", "Source and beneficiary verified", decidedAt);
 
         assertThat(approval.getStatus()).isEqualTo(ApprovalStatus.APPROVED);
         assertThat(approval.getDecidedBy()).isEqualTo("reviewer-1");
+        assertThat(approval.getReason()).isEqualTo("Source and beneficiary verified");
         assertThat(approval.getDecidedAt()).isEqualTo(decidedAt);
     }
 
@@ -30,10 +31,11 @@ class ApprovalStateMachineTest {
         Approval approval = pendingApproval();
         Instant decidedAt = CREATED_AT.plusSeconds(60);
 
-        approval.deny("reviewer-1", decidedAt);
+        approval.deny("reviewer-1", "Counterparty is not expected", decidedAt);
 
         assertThat(approval.getStatus()).isEqualTo(ApprovalStatus.DENIED);
         assertThat(approval.getDecidedBy()).isEqualTo("reviewer-1");
+        assertThat(approval.getReason()).isEqualTo("Counterparty is not expected");
         assertThat(approval.getDecidedAt()).isEqualTo(decidedAt);
     }
 

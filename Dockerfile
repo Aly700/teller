@@ -3,6 +3,7 @@ WORKDIR /workspace
 COPY .mvn/ .mvn/
 COPY mvnw pom.xml ./
 COPY src/ src/
+COPY console/dist/ console/dist/
 RUN chmod +x mvnw && ./mvnw -o -q -DskipTests package
 
 FROM eclipse-temurin:21-jre-jammy

@@ -10,6 +10,10 @@ public interface AuditRecordRepository extends JpaRepository<AuditRecord, UUID>,
             Instant from,
             Instant to);
 
+    List<AuditRecord> findByOccurredAtGreaterThanEqualAndOccurredAtLessThanOrderByOccurredAtDescIdDesc(
+            Instant from,
+            Instant to);
+
     @Override
     default AuditRecord storeAuditRecord(AuditRecord record) {
         return save(record);
@@ -22,6 +26,6 @@ public interface AuditRecordRepository extends JpaRepository<AuditRecord, UUID>,
 
     @Override
     default List<AuditRecord> findAuditRecords(Instant from, Instant to) {
-        return findByOccurredAtGreaterThanEqualAndOccurredAtLessThanOrderByOccurredAtAscIdAsc(from, to);
+        return findByOccurredAtGreaterThanEqualAndOccurredAtLessThanOrderByOccurredAtDescIdDesc(from, to);
     }
 }

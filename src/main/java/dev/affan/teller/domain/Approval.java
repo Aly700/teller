@@ -29,6 +29,9 @@ public class Approval {
     @Column(name = "decided_by")
     private String decidedBy;
 
+    @Column(length = 500)
+    private String reason;
+
     @Column(name = "decided_at")
     private Instant decidedAt;
 
@@ -60,11 +63,19 @@ public class Approval {
     }
 
     public void approve(String reviewer, Instant at) {
-        decide(ApprovalStatus.APPROVED, reviewer, at);
+        approve(reviewer, null, at);
+    }
+
+    public void approve(String reviewer, String reason, Instant at) {
+        decide(ApprovalStatus.APPROVED, reviewer, reason, at);
     }
 
     public void deny(String reviewer, Instant at) {
-        decide(ApprovalStatus.DENIED, reviewer, at);
+        deny(reviewer, null, at);
+    }
+
+    public void deny(String reviewer, String reason, Instant at) {
+        decide(ApprovalStatus.DENIED, reviewer, reason, at);
     }
 
     public void expire(Instant at) {
@@ -77,7 +88,7 @@ public class Approval {
         decidedAt = at;
     }
 
-    private void decide(ApprovalStatus terminalStatus, String reviewer, Instant at) {
+    private void decide(ApprovalStatus terminalStatus, String reviewer, String reason, Instant at) {
         requirePending();
         if (reviewer == null || reviewer.isBlank()) {
             throw new IllegalArgumentException("decidedBy must not be blank");
@@ -87,8 +98,20 @@ public class Approval {
             throw new InvalidApprovalTransitionException("approval is expired");
         }
         status = terminalStatus;
-        decidedBy = reviewer;
+        decidedBy = reviewer.trim();
+        this.reason = normalizeReason(reason);
         this.decidedAt = decidedAt;
+    }
+
+    private static String normalizeReason(String reason) {
+        if (reason == null || reason.isBlank()) {
+            return null;
+        }
+        String normalized = reason.trim();
+        if (normalized.length() > 500) {
+            throw new IllegalArgumentException("reason must not exceed 500 characters");
+        }
+        return normalized;
     }
 
     private void requirePending() {
@@ -111,6 +134,10 @@ public class Approval {
 
     public String getDecidedBy() {
         return decidedBy;
+    }
+
+    public String getReason() {
+        return reason;
     }
 
     public Instant getDecidedAt() {

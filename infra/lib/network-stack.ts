@@ -9,6 +9,7 @@ export class NetworkStack extends cdk.Stack {
     super(scope, id, props);
 
     this.vpc = new ec2.Vpc(this, 'Vpc', {
+      vpcName: 'teller-vpc',
       maxAzs: 2,
       natGateways: 0,
       restrictDefaultSecurityGroup: true,

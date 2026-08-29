@@ -6,6 +6,7 @@ import dev.affan.teller.sqs.ApprovalMessageValidator;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.List;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.UUID;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -45,8 +46,13 @@ public class ApprovalService implements ApprovalMessageProcessor {
 
     @Transactional
     public Approval approve(UUID id, String decidedBy) {
+        return approve(id, decidedBy, null);
+    }
+
+    @Transactional
+    public Approval approve(UUID id, String decidedBy, String reason) {
         Approval approval = requireApproval(id);
-        approval.approve(decidedBy, clock.instant());
+        approval.approve(decidedBy, reason, clock.instant());
         lifecycleListener.approved(approval.getDecisionId());
         audit(approval, AuditEventType.APPROVAL_APPROVED);
         return approval;
@@ -54,8 +60,13 @@ public class ApprovalService implements ApprovalMessageProcessor {
 
     @Transactional
     public Approval deny(UUID id, String decidedBy) {
+        return deny(id, decidedBy, null);
+    }
+
+    @Transactional
+    public Approval deny(UUID id, String decidedBy, String reason) {
         Approval approval = requireApproval(id);
-        approval.deny(decidedBy, clock.instant());
+        approval.deny(decidedBy, reason, clock.instant());
         lifecycleListener.rejected(approval.getDecisionId(), "APPROVAL_DENIED");
         audit(approval, AuditEventType.APPROVAL_DENIED);
         return approval;
@@ -97,12 +108,19 @@ public class ApprovalService implements ApprovalMessageProcessor {
     }
 
     private void audit(Approval approval, AuditEventType eventType) {
+        Map<String, Object> details = new LinkedHashMap<>();
+        details.put("decisionId", approval.getDecisionId());
+        details.put("status", approval.getStatus());
+        if (approval.getDecidedBy() != null) {
+            details.put("decidedBy", approval.getDecidedBy());
+        }
+        if (approval.getReason() != null) {
+            details.put("reason", approval.getReason());
+        }
         auditService.append(
                 eventType,
                 "APPROVAL",
                 approval.getId(),
-                Map.of(
-                        "decisionId", approval.getDecisionId(),
-                        "status", approval.getStatus()));
+                details);
     }
 }

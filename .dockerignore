@@ -3,6 +3,7 @@
 .idea
 .vscode
 infra
+console/node_modules
 target
 docs
 README.md

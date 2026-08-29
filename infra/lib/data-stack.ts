@@ -17,6 +17,7 @@ export class DataStack extends cdk.Stack {
     super(scope, id, props);
 
     this.databaseSecret = new secretsmanager.Secret(this, 'DatabaseSecret', {
+      secretName: 'teller-database-credentials',
       description: 'Teller database credentials',
       generateSecretString: {
         secretStringTemplate: JSON.stringify({ username: 'teller_admin' }),
@@ -28,6 +29,7 @@ export class DataStack extends cdk.Stack {
     this.databaseSecret.applyRemovalPolicy(cdk.RemovalPolicy.DESTROY);
 
     this.apiKeySecret = new secretsmanager.Secret(this, 'ApiKeySecret', {
+      secretName: 'teller-api-key',
       description: 'Teller static API credential',
       generateSecretString: {
         secretStringTemplate: '{}',
@@ -39,6 +41,7 @@ export class DataStack extends cdk.Stack {
     this.apiKeySecret.applyRemovalPolicy(cdk.RemovalPolicy.DESTROY);
 
     this.database = new rds.DatabaseInstance(this, 'Database', {
+      instanceIdentifier: 'teller-database',
       vpc: props.vpc,
       vpcSubnets: { subnetType: ec2.SubnetType.PUBLIC },
       publiclyAccessible: false,

@@ -17,5 +17,15 @@ jobs:
           distribution: temurin
           java-version: "21"
           cache: maven
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: console/package-lock.json
+      - name: Test and build approvals console
+        run: |
+          npm --prefix console ci
+          npm --prefix console test -- --run
+          npm --prefix console run build
       - name: Build and test
         run: ./mvnw -q verify

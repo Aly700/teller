@@ -59,6 +59,23 @@ class ApiKeyFilterTest {
         assertThat(continued).isTrue();
     }
 
+    @Test
+    void allowsConsoleAssetsWithoutAnApiKeyButStillProtectsApprovalJson() throws Exception {
+        assertThat(continuesWithoutApiKey("/console/")).isTrue();
+        assertThat(continuesWithoutApiKey("/console/assets/index.js")).isTrue();
+        assertThat(continuesWithoutApiKey("/approvals")).isFalse();
+        assertThat(continuesWithoutApiKey("/approvals/00000000-0000-0000-0000-000000000000/transfer"))
+                .isFalse();
+    }
+
+    private boolean continuesWithoutApiKey(String uri) throws Exception {
+        MockHttpServletRequest request = request(uri);
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        AtomicBoolean continued = new AtomicBoolean();
+        filter.doFilter(request, response, (ignoredRequest, ignoredResponse) -> continued.set(true));
+        return continued.get();
+    }
+
     private static MockHttpServletRequest request(String uri) {
         return new MockHttpServletRequest("GET", uri);
     }

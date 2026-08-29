@@ -11,5 +11,7 @@ public interface ApprovalStore {
 
     Optional<Approval> findApprovalById(UUID id);
 
+    List<Approval> findApprovals(ApprovalStatus status);
+
     List<Approval> findStaleApprovals(ApprovalStatus status, Instant expiresAt);
 }

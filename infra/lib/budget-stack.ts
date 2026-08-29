@@ -12,6 +12,7 @@ export class BudgetStack extends cdk.Stack {
 
     new budgets.CfnBudget(this, 'MonthlyBudget', {
       budget: {
+        budgetName: 'teller-monthly',
         budgetLimit: { amount: 10, unit: 'USD' },
         budgetType: 'COST',
         timeUnit: 'MONTHLY',

@@ -101,12 +101,29 @@ class ApiIntegrationTest {
                 .filteredOn(record -> record.getEventType() == AuditEventType.APPROVAL_CREATED)
                 .hasSize(1);
 
+        mockMvc.perform(get("/approvals")
+                        .header("X-API-Key", "integration-key")
+                        .param("status", "PENDING"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[?(@.id == '%s')]".formatted(approvalId)).exists());
+
         mockMvc.perform(post("/approvals/{id}/approve", approvalId)
                         .header("X-API-Key", "integration-key")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"decidedBy\":\"reviewer-1\"}"))
+                        .content("""
+                                {"decidedBy":"reviewer-1","reason":"Ticket and payload verified"}
+                                """))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.status").value("APPROVED"));
+                .andExpect(jsonPath("$.status").value("APPROVED"))
+                .andExpect(jsonPath("$.reason").value("Ticket and payload verified"));
+
+        assertThat(approvals.findById(approvalUuid).orElseThrow().getReason())
+                .isEqualTo("Ticket and payload verified");
+        assertThat(auditRecords.findAll())
+                .filteredOn(record -> record.getAggregateId().equals(approvalUuid))
+                .filteredOn(record -> record.getEventType() == AuditEventType.APPROVAL_APPROVED)
+                .singleElement()
+                .satisfies(record -> assertThat(record.getDetails()).contains("Ticket and payload verified"));
 
         mockMvc.perform(get("/decisions/{id}", decisionId)
                         .header("X-API-Key", "integration-key"))

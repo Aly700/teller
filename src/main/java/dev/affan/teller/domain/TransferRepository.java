@@ -11,6 +11,10 @@ import org.springframework.data.repository.query.Param;
 
 public interface TransferRepository extends JpaRepository<Transfer, UUID>, TransferStore {
 
+    Optional<Transfer> findByApprovalId(UUID approvalId);
+
+    long countByState(TransferState state);
+
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     Optional<Transfer> findLockedByDecisionId(UUID decisionId);
 
@@ -34,6 +38,11 @@ public interface TransferRepository extends JpaRepository<Transfer, UUID>, Trans
     }
 
     @Override
+    default Optional<Transfer> findTransferByApprovalId(UUID approvalId) {
+        return findByApprovalId(approvalId);
+    }
+
+    @Override
     default Optional<Transfer> findLockedTransferById(UUID id) {
         return findLockedById(id);
     }
@@ -53,4 +62,10 @@ public interface TransferRepository extends JpaRepository<Transfer, UUID>, Trans
     default java.util.List<Transfer> findAllTransfers() {
         return findAll();
     }
+
+    @Override
+    default long countTransfersByState(TransferState state) {
+        return countByState(state);
+    }
+
 }
