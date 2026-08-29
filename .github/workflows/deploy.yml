@@ -1,8 +1,12 @@
 name: Deploy
 
 on:
-  push:
-    branches: [main]
+  workflow_dispatch:
+    inputs:
+      reason:
+        description: 'Why this deploy is being run'
+        required: false
+        default: 'manual deploy'
 
 permissions:
   contents: read
@@ -57,4 +61,4 @@ jobs:
         working-directory: infra
         env:
           IMAGE_TAG: ${{ github.sha }}
-        run: npx cdk deploy --all --require-approval never -c imageTag="$IMAGE_TAG"
+        run: npx cdk deploy TellerBudgetStack TellerNetworkStack TellerQueueStack TellerBucketStack TellerDataStack TellerServiceStack --require-approval never -c imageTag="$IMAGE_TAG" -c budgetEmail="${{ vars.BUDGET_EMAIL }}"
