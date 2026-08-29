@@ -38,8 +38,8 @@ export class ServiceStack extends cdk.Stack {
     });
     const taskDefinition = new ecs.FargateTaskDefinition(this, 'TaskDefinition', {
       family: 'teller-task',
-      cpu: 256,
-      memoryLimitMiB: 512,
+      cpu: Number(this.node.tryGetContext('taskCpu') ?? 256),
+      memoryLimitMiB: Number(this.node.tryGetContext('taskMemory') ?? 512),
     });
 
     const container = taskDefinition.addContainer('Application', {
