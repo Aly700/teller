@@ -4,7 +4,7 @@ import { Construct } from 'constructs';
 
 const GITHUB_OIDC_URL = 'https://token.actions.githubusercontent.com';
 const GITHUB_OIDC_HOST = 'token.actions.githubusercontent.com';
-const GITHUB_REPOSITORY_SUBJECT = 'repo:Aly700/agentops-gate:ref:refs/heads/main';
+const GITHUB_REPOSITORY_SUBJECT = 'repo:Aly700/teller:ref:refs/heads/main';
 
 export class GithubOidcStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props?: cdk.StackProps) {
@@ -23,8 +23,8 @@ export class GithubOidcStack extends cdk.Stack {
         });
 
     const deployRole = new iam.Role(this, 'GithubDeployRole', {
-      roleName: 'agentops-gate-github-deploy',
-      description: 'GitHub Actions deployment role for AgentOps Gate main',
+      roleName: 'teller-github-deploy',
+      description: 'GitHub Actions deployment role for Teller main',
       assumedBy: new iam.WebIdentityPrincipal(provider.openIdConnectProviderArn, {
         StringEquals: {
           [`${GITHUB_OIDC_HOST}:aud`]: 'sts.amazonaws.com',
@@ -36,7 +36,7 @@ export class GithubOidcStack extends cdk.Stack {
     const repositoryArn = cdk.Stack.of(this).formatArn({
       service: 'ecr',
       resource: 'repository',
-      resourceName: 'agentops-gate',
+      resourceName: 'teller',
     });
     deployRole.addToPolicy(new iam.PolicyStatement({
       actions: ['ecr:GetAuthorizationToken'],

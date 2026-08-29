@@ -9,10 +9,10 @@
 		<relativePath/> <!-- lookup parent from repository -->
 	</parent>
 	<groupId>dev.affan</groupId>
-	<artifactId>agentops-gate</artifactId>
+	<artifactId>teller</artifactId>
 	<version>0.0.1-SNAPSHOT</version>
-	<name>agentops-gate</name>
-	<description>Policy and approval service for AI tool calls</description>
+	<name>teller</name>
+	<description>Double-entry payments core with a policy and approval gate</description>
 	<url/>
 	<licenses>
 		<license/>

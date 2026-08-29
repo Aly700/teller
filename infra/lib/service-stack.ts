@@ -17,6 +17,7 @@ export interface ServiceStackProps extends cdk.StackProps {
   readonly databaseSecret: secretsmanager.ISecret;
   readonly apiKeySecret: secretsmanager.ISecret;
   readonly approvalQueue: sqs.IQueue;
+  readonly approvalDeadLetterQueue: sqs.IQueue;
   readonly auditBucket: s3.IBucket;
   readonly imageTag: string;
 }
@@ -25,7 +26,7 @@ export class ServiceStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props: ServiceStackProps) {
     super(scope, id, props);
 
-    const repository = ecr.Repository.fromRepositoryName(this, 'Repository', 'agentops-gate');
+    const repository = ecr.Repository.fromRepositoryName(this, 'Repository', 'teller');
     const cluster = new ecs.Cluster(this, 'Cluster', { vpc: props.vpc });
     const logGroup = new logs.LogGroup(this, 'ApplicationLogs', {
       retention: logs.RetentionDays.ONE_WEEK,
@@ -40,14 +41,15 @@ export class ServiceStack extends cdk.Stack {
       image: ecs.ContainerImage.fromEcrRepository(repository, props.imageTag),
       logging: ecs.LogDrivers.awsLogs({
         logGroup,
-        streamPrefix: 'agentops-gate',
+        streamPrefix: 'teller',
       }),
       environment: {
-        DB_URL: `jdbc:postgresql://${props.database.dbInstanceEndpointAddress}:${props.database.dbInstanceEndpointPort}/agentops_gate`,
+        DB_URL: `jdbc:postgresql://${props.database.dbInstanceEndpointAddress}:${props.database.dbInstanceEndpointPort}/teller`,
         AWS_REGION: cdk.Stack.of(this).region,
-        AGENTOPS_AWS_ENABLED: 'true',
+        TELLER_AWS_ENABLED: 'true',
         AUDIT_EXPORT_ENABLED: 'true',
         APPROVAL_QUEUE_URL: props.approvalQueue.queueUrl,
+        APPROVAL_DLQ_URL: props.approvalDeadLetterQueue.queueUrl,
         APPROVAL_WORKER_ENABLED: 'true',
         SQS_WAIT_TIME_SECONDS: '20',
         AUDIT_BUCKET: props.auditBucket.bucketName,
@@ -55,13 +57,14 @@ export class ServiceStack extends cdk.Stack {
       secrets: {
         DB_USERNAME: ecs.Secret.fromSecretsManager(props.databaseSecret, 'username'),
         DB_PASSWORD: ecs.Secret.fromSecretsManager(props.databaseSecret, 'password'),
-        AGENTOPS_API_KEY: ecs.Secret.fromSecretsManager(props.apiKeySecret, 'apiKey'),
+        TELLER_API_KEY: ecs.Secret.fromSecretsManager(props.apiKeySecret, 'apiKey'),
       },
     });
     container.addPortMappings({ containerPort: 8080 });
 
     props.approvalQueue.grantSendMessages(taskDefinition.taskRole);
     props.approvalQueue.grantConsumeMessages(taskDefinition.taskRole);
+    props.approvalDeadLetterQueue.grantConsumeMessages(taskDefinition.taskRole);
     taskDefinition.taskRole.addToPrincipalPolicy(new iam.PolicyStatement({
       actions: ['s3:PutObject'],
       resources: [props.auditBucket.arnForObjects('audit/*')],
@@ -90,12 +93,12 @@ export class ServiceStack extends cdk.Stack {
       ipProtocol: 'tcp',
       fromPort: 5432,
       toPort: 5432,
-      description: 'AgentOps Gate database access',
+      description: 'Teller database access',
     });
 
     const serverErrors = new logs.MetricFilter(this, 'ServerErrorMetricFilter', {
       logGroup,
-      metricNamespace: 'AgentOpsGate',
+      metricNamespace: 'Teller',
       metricName: 'Http5xxCount',
       filterPattern: logs.FilterPattern.literal('"event=http_request" "status=5*"'),
       metricValue: '1',
@@ -110,7 +113,7 @@ export class ServiceStack extends cdk.Stack {
       evaluationPeriods: 1,
       comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
       treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
-      alarmDescription: 'AgentOps Gate emitted at least five HTTP 5xx responses in five minutes',
+      alarmDescription: 'Teller emitted at least five HTTP 5xx responses in five minutes',
     });
   }
 }

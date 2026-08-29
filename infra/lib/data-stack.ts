@@ -17,9 +17,9 @@ export class DataStack extends cdk.Stack {
     super(scope, id, props);
 
     this.databaseSecret = new secretsmanager.Secret(this, 'DatabaseSecret', {
-      description: 'AgentOps Gate database credentials',
+      description: 'Teller database credentials',
       generateSecretString: {
-        secretStringTemplate: JSON.stringify({ username: 'agentops_admin' }),
+        secretStringTemplate: JSON.stringify({ username: 'teller_admin' }),
         generateStringKey: 'password',
         excludePunctuation: true,
         passwordLength: 40,
@@ -28,7 +28,7 @@ export class DataStack extends cdk.Stack {
     this.databaseSecret.applyRemovalPolicy(cdk.RemovalPolicy.DESTROY);
 
     this.apiKeySecret = new secretsmanager.Secret(this, 'ApiKeySecret', {
-      description: 'AgentOps Gate static API credential',
+      description: 'Teller static API credential',
       generateSecretString: {
         secretStringTemplate: '{}',
         generateStringKey: 'apiKey',
@@ -47,7 +47,7 @@ export class DataStack extends cdk.Stack {
       }),
       instanceType: ec2.InstanceType.of(ec2.InstanceClass.T4G, ec2.InstanceSize.MICRO),
       credentials: rds.Credentials.fromSecret(this.databaseSecret),
-      databaseName: 'agentops_gate',
+      databaseName: 'teller',
       multiAz: false,
       allocatedStorage: 20,
       maxAllocatedStorage: 40,
