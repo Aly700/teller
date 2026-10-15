@@ -13,28 +13,9 @@ All flows below are simulations over synthetic data. Teller has no connection to
 
 ## Architecture
 
-```mermaid
-flowchart LR
-    Client[Client or approvals console] -->|X-API-Key| API[Spring Boot API]
-    API --> Idem[Idempotency record]
-    API --> Gate[Active policy<br/>first match wins]
-    Gate -->|ALLOW| Post[Double-entry post]
-    Gate -->|DENY| Denied[DENIED transfer]
-    Gate -->|REQUIRE_APPROVAL| Hold[HELD + reservation]
-    Post --> DB[(PostgreSQL)]
-    Denied --> DB
-    Hold --> DB
-    DB --> Outbox[Transactional outbox]
-    Outbox --> SQS[SQS + DLQ]
-    SQS --> Worker[Idempotent worker]
-    Reviewer[Second reviewer] --> Console[React console /console/]
-    Console --> API
-    DB --> Export[Date-partitioned JSONL]
-    Export --> S3[S3]
-    S3 --> Reconcile[Reconciliation]
-    DB --> Reconcile
-    Reconcile -->|mismatch| Audit[Append-only audit + metric]
-```
+![Teller architecture: callers, the approvals console and an operator outside AWS; one Fargate task with PostgreSQL as the system of record, SQS for the approval event, S3 for reconciliation files](docs/architecture.svg)
+
+The numbered arrows are walked one by one in [docs/architecture.md](docs/architecture.md), with the component table, the trust and data boundaries, and where each guarantee is proven.
 
 The API, SQS worker, outbox relay, approval expiry, export, reconciliation scheduler, and built React console run in one image. PostgreSQL is authoritative. SQS is at-least-once transport, S3 holds immutable per-run entry and audit exports, and CDK defines seven separately deployable stacks.
 
